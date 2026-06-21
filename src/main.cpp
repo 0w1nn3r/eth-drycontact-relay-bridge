@@ -45,8 +45,11 @@ bool isPaired = false;
 String pairedDeviceID = "";
 String pairedDeviceIP = "";
 unsigned long lastDiscoveryBroadcast = 0;
-unsigned long lastDiscoveryScan = 0;
 bool discoveryEnabled = true;
+
+// Paired-peer liveness, derived from received heartbeats
+unsigned long lastPeerHeartbeat = 0;
+bool peerOnline = false;
 
 // State logger
 StateLogger stateLogger;
@@ -64,7 +67,8 @@ bool factoryResetBootDetection = false;
 Display display;
 WebServer webServer(deviceID, currentMode, ethernetConnected, jumperModeDetected,
                    isPaired, pairedDeviceID, pairedDeviceIP, receiverIP,
-                   discoveryEnabled, dryContactState, relayState, channel1Name, channel2Name);
+                   discoveryEnabled, peerOnline, dryContactState, relayState,
+                   channel1Name, channel2Name);
 
 // Function prototypes
 void setupHardware();
@@ -82,7 +86,8 @@ void setupDryContactSender();
 void setupRelayReceiver();
 void detectModeFromJumper();
 void sendDiscoveryBroadcast();
-void scanForSenders();
+void processIncomingPackets();
+void updatePeerStatus();
 void handleDiscoveryPacket(const String& message);
 void pairWithDevice(const String& deviceID, const String& deviceIP);
 void unpairDevice();
@@ -179,21 +184,21 @@ void loop() {
         sendHeartbeat();
         lastHeartbeat = millis();
     }
-    
-    // Handle discovery and pairing
-    if (ethernetConnected && discoveryEnabled) {
-        if (currentMode == MODE_DRY_CONTACT_SENDER) {
-            // Senders broadcast their presence every 10 seconds
-            if (millis() - lastDiscoveryBroadcast > 10000) {
-                sendDiscoveryBroadcast();
-                lastDiscoveryBroadcast = millis();
-            }
-        } else if (currentMode == MODE_RELAY_RECEIVER && !isPaired) {
-            // Receivers scan for senders every 5 seconds until paired
-            if (millis() - lastDiscoveryScan > 5000) {
-                scanForSenders();
-                lastDiscoveryScan = millis();
-            }
+
+    // Continuously receive discovery + heartbeat packets, then re-evaluate
+    // whether the paired peer is still alive.
+    if (ethernetConnected) {
+        processIncomingPackets();
+    }
+    updatePeerStatus();
+
+    // Senders broadcast their presence every 10 seconds so unpaired
+    // receivers can discover them.
+    if (ethernetConnected && discoveryEnabled &&
+        currentMode == MODE_DRY_CONTACT_SENDER) {
+        if (millis() - lastDiscoveryBroadcast > 10000) {
+            sendDiscoveryBroadcast();
+            lastDiscoveryBroadcast = millis();
         }
     }
     
@@ -288,6 +293,11 @@ void setupNetwork() {
                 } else {
                     Serial.println("Error setting up MDNS responder!");
                 }
+
+                // Bind the UDP socket once for the lifetime of the device so we
+                // can continuously receive discovery and heartbeat broadcasts.
+                udp.begin(DEVICE_DISCOVERY_PORT);
+                Serial.println("UDP listener started on port " + String(DEVICE_DISCOVERY_PORT));
             } else {
                 Serial.println(" DHCP failed!");
                 ethernetConnected = false;
@@ -497,18 +507,23 @@ void sendHeartbeat() {
     }
     
     JsonDocument doc;
+    doc["type"] = "heartbeat";
     doc["device_id"] = deviceID;
     doc["mode"] = currentMode;
     doc["status"] = "online";
+    doc["ip_address"] = ETH.localIP().toString();
     doc["timestamp"] = millis();
     doc["protocol_version"] = PROTOCOL_VERSION;
-    
+
     String message;
     serializeJson(doc, message);
-    
-    // Send heartbeat via broadcast for device discovery
-    Serial.println("Heartbeat: " + message);
-    // TODO: Implement UDP broadcast
+
+    // Broadcast heartbeat so the paired peer can track our liveness.
+    udp.beginPacket("255.255.255.255", DEVICE_DISCOVERY_PORT);
+    udp.print(message);
+    udp.endPacket();
+
+    Serial.println("Heartbeat broadcast sent: " + message);
 }
 
 void processIncomingMessage(const String& message, const String& senderIP) {
@@ -621,29 +636,70 @@ void sendDiscoveryBroadcast() {
     Serial.println("Discovery broadcast sent: " + message);
 }
 
-void scanForSenders() {
-    Serial.println("Scanning for senders...");
-    
-    // Listen for discovery responses
-    udp.begin(DEVICE_DISCOVERY_PORT);
-    
-    unsigned long scanStart = millis();
-    while (millis() - scanStart < 3000) { // Scan for 3 seconds
-        int packetSize = udp.parsePacket();
-        if (packetSize > 0) {
-            char packetBuffer[512];
-            int len = udp.read(packetBuffer, packetSize - 1);
-            packetBuffer[len] = '\0';
-            
-            String message = String(packetBuffer);
-            Serial.println("Received discovery packet: " + message);
-            
-            handleDiscoveryPacket(message);
-        }
-        delay(10);
+// True when this device has a peer whose liveness we expect to track:
+// a receiver tracks its paired sender; a sender tracks its configured receiver.
+static bool hasTrackedPeer() {
+    return (currentMode == MODE_RELAY_RECEIVER && isPaired) ||
+           (currentMode == MODE_DRY_CONTACT_SENDER && receiverIP.length() > 0);
+}
+
+// Record a heartbeat if it came from our peer, identified by device ID
+// (receiver knows its paired sender) or by source IP.
+static void recordPeerHeartbeat(const String& hbDeviceID, const String& srcIP) {
+    bool fromPeer = false;
+    if (currentMode == MODE_RELAY_RECEIVER && isPaired) {
+        fromPeer = (hbDeviceID == pairedDeviceID) || (srcIP == pairedDeviceIP);
+    } else if (currentMode == MODE_DRY_CONTACT_SENDER && receiverIP.length() > 0) {
+        fromPeer = (srcIP == receiverIP);
     }
-    
-    udp.stop();
+    if (fromPeer) {
+        lastPeerHeartbeat = millis();
+    }
+}
+
+// Non-blocking: drain any pending UDP packets and dispatch them. Discovery
+// packets drive pairing (when enabled); heartbeats update peer liveness.
+void processIncomingPackets() {
+    int packetSize = udp.parsePacket();
+    while (packetSize > 0) {
+        char packetBuffer[512];
+        int len = udp.read(packetBuffer, sizeof(packetBuffer) - 1);
+        if (len < 0) len = 0;
+        packetBuffer[len] = '\0';
+
+        String srcIP = udp.remoteIP().toString();
+        String message = String(packetBuffer);
+
+        JsonDocument doc;
+        if (deserializeJson(doc, message) == DeserializationError::Ok) {
+            String type = doc["type"] | "";
+            if (type == "heartbeat") {
+                recordPeerHeartbeat(doc["device_id"] | "", srcIP);
+            } else if (discoveryEnabled) {
+                handleDiscoveryPacket(message);
+            }
+        }
+
+        packetSize = udp.parsePacket();
+    }
+}
+
+// Re-evaluate peer online/offline from the most recent heartbeat and surface
+// the result; log only on transitions.
+void updatePeerStatus() {
+    bool online = hasTrackedPeer() && lastPeerHeartbeat != 0 &&
+                  (millis() - lastPeerHeartbeat < PEER_OFFLINE_TIMEOUT_MS);
+
+    if (online != peerOnline) {
+        peerOnline = online;
+        Serial.println(peerOnline ? "Paired peer is ONLINE" : "Paired peer is OFFLINE");
+        stateLogger.logSystemEvent(peerOnline ? "Paired peer online"
+                                              : "Paired peer offline (heartbeat timeout)");
+    }
+
+    if (display.isAvailable()) {
+        display.setPeerOnline(peerOnline, hasTrackedPeer());
+    }
 }
 
 void handleDiscoveryPacket(const String& message) {
@@ -680,6 +736,7 @@ void pairWithDevice(const String& deviceID, const String& deviceIP) {
     pairedDeviceID = deviceID;
     pairedDeviceIP = deviceIP;
     receiverIP = deviceIP; // Update the receiver IP for sending commands
+    lastPeerHeartbeat = millis(); // Grace period until the first heartbeat arrives
     
     savePairingSettings();
     
@@ -764,6 +821,7 @@ void loadPairingSettings() {
 
     if (isPaired && pairedDeviceID.length() > 0 && pairedDeviceIP.length() > 0) {
         receiverIP = pairedDeviceIP; // Update receiver IP for communication
+        lastPeerHeartbeat = millis(); // Grace period until the first heartbeat arrives
         Serial.println("Loaded pairing settings:");
         Serial.println("  Paired with: " + pairedDeviceID);
         Serial.println("  Paired IP: " + pairedDeviceIP);

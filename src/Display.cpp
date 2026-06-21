@@ -5,7 +5,9 @@ Display::Display() : display(OLED_WIDTH, OLED_HEIGHT, &Wire, OLED_RESET),
                      lastUpdateTime(0),
                      updateInterval(1000),
                      currentMode(MODE_UNDEFINED),
-                     ethernetConnected(false) {
+                     ethernetConnected(false),
+                     peerOnline(false),
+                     hasPeer(false) {
     inputState[0] = false;
     inputState[1] = false;
     outputState[0] = false;
@@ -160,9 +162,13 @@ void Display::drawNetworkInfo() {
         display.println("IP: ---.---.---");
     }
     
-    // Remote IP (for sender mode) - only show if space allows
-    if (currentMode == MODE_DRY_CONTACT_SENDER && remoteIP.length() > 0) {
-        display.setCursor(0, 46);
+    // Peer liveness: a receiver tracks its paired sender, a sender tracks its
+    // configured receiver. Fall back to the remote IP when no peer is known.
+    display.setCursor(0, 46);
+    if (hasPeer) {
+        String label = (currentMode == MODE_RELAY_RECEIVER) ? "Sender:" : "Recv:";
+        display.println(label + String(peerOnline ? " ONLINE" : " OFFLINE"));
+    } else if (currentMode == MODE_DRY_CONTACT_SENDER && remoteIP.length() > 0) {
         display.println("R: " + remoteIP.substring(0, 12));
     }
 }

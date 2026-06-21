@@ -23,6 +23,8 @@ private:
     bool outputState[2];    // For receiver: relay state for channels 1 & 2
     bool ethernetConnected;
     String channelNames[2]; // Custom channel names
+    bool peerOnline;        // Paired peer reachable (from heartbeats)
+    bool hasPeer;           // Whether a peer is expected at all
     
 public:
     Display();
@@ -42,6 +44,7 @@ public:
         if (channel >= 1 && channel <= 2) outputState[channel - 1] = state; 
     }
     void setEthernetConnected(bool connected) { ethernetConnected = connected; }
+    void setPeerOnline(bool online, bool present) { peerOnline = online; hasPeer = present; }
     void setChannelNames(const String& name1, const String& name2) { 
         channelNames[0] = name1; 
         channelNames[1] = name2; 

@@ -67,6 +67,9 @@ enum OperationMode {
 #define UDP_PORT 8888
 #define TCP_PORT 80
 #define HEARTBEAT_INTERVAL_MS 30000
+// A paired peer is considered offline after this long without a heartbeat
+// (3 missed 30s beats).
+#define PEER_OFFLINE_TIMEOUT_MS 90000
 #define DEVICE_DISCOVERY_PORT 8900
 
 // Web interface
