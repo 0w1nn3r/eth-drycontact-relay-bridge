@@ -31,6 +31,7 @@ private:
     String& pairedDeviceIP;
     String& receiverIP;
     bool& discoveryEnabled;
+    bool& peerOnline;
     bool* dryContactState;
     bool* relayState;
     String& channel1Name;
@@ -59,8 +60,8 @@ public:
     WebServer(String& deviceID, OperationMode& currentMode, bool& ethernetConnected,
               bool& jumperModeDetected, bool& isPaired, String& pairedDeviceID,
               String& pairedDeviceIP, String& receiverIP,
-              bool& discoveryEnabled, bool* dryContactState, bool* relayState,
-              String& channel1Name, String& channel2Name);
+              bool& discoveryEnabled, bool& peerOnline, bool* dryContactState,
+              bool* relayState, String& channel1Name, String& channel2Name);
     
     void setDisplay(Display* displayPtr) { display = displayPtr; }
     void setStateLogger(StateLogger* loggerPtr) { stateLogger = loggerPtr; }

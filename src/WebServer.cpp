@@ -3,8 +3,8 @@
 WebServer::WebServer(String& deviceID, OperationMode& currentMode, bool& ethernetConnected,
                      bool& jumperModeDetected, bool& isPaired, String& pairedDeviceID,
                      String& pairedDeviceIP, String& receiverIP,
-                     bool& discoveryEnabled, bool* dryContactState, bool* relayState,
-                     String& channel1Name, String& channel2Name)
+                     bool& discoveryEnabled, bool& peerOnline, bool* dryContactState,
+                     bool* relayState, String& channel1Name, String& channel2Name)
     : server(WEB_PORT),
       display(nullptr),
       stateLogger(nullptr),
@@ -17,6 +17,7 @@ WebServer::WebServer(String& deviceID, OperationMode& currentMode, bool& etherne
       pairedDeviceIP(pairedDeviceIP),
       receiverIP(receiverIP),
       discoveryEnabled(discoveryEnabled),
+      peerOnline(peerOnline),
       dryContactState(dryContactState),
       relayState(relayState),
       channel1Name(channel1Name),
@@ -82,8 +83,9 @@ String WebServer::generateRootHTML() {
             <p><strong>Paired:</strong> <span id="paired-status">)=====" + String(isPaired ? "Yes" : "No") + R"=====(</span></p>
             <p><strong>Paired Device:</strong> <span id="paired-device">)=====" + (isPaired ? pairedDeviceID : "None") + R"=====(</span></p>
             <p><strong>Paired IP:</strong> <span id="paired-ip">)=====" + (isPaired ? pairedDeviceIP : "None") + R"=====(</span></p>
+            <p><strong>Peer Status:</strong> <span id="peer-status">)=====" + String(((currentMode == MODE_RELAY_RECEIVER && isPaired) || (currentMode == MODE_DRY_CONTACT_SENDER && receiverIP.length() > 0)) ? (peerOnline ? "Online" : "Offline") : "N/A") + R"=====(</span></p>
         </div>
-        
+
         <div class="form-group">
             <h3>Configuration</h3>
             <p><strong>Mode:</strong> <span id="mode-display">)=====" + String(currentMode == MODE_DRY_CONTACT_SENDER ? "Dry Contact Sender" : currentMode == MODE_RELAY_RECEIVER ? "Relay Receiver" : "Not Configured") + R"=====(</span> (Set by jumper)</p>
@@ -134,6 +136,7 @@ String WebServer::generateRootHTML() {
                     document.getElementById('paired-status').textContent = data.is_paired ? 'Yes' : 'No';
                     document.getElementById('paired-device').textContent = data.paired_device_id || 'None';
                     document.getElementById('paired-ip').textContent = data.paired_device_ip || 'None';
+                    document.getElementById('peer-status').textContent = data.has_peer ? (data.peer_online ? 'Online' : 'Offline') : 'N/A';
                     document.getElementById('discovery-btn').textContent = data.discovery_enabled ? 'Disable Discovery' : 'Enable Discovery';
                 })
                 .catch(error => console.log('Error:', error));
@@ -335,6 +338,12 @@ void WebServer::handleAPI() {
     doc["paired_device_id"] = pairedDeviceID;
     doc["paired_device_ip"] = pairedDeviceIP;
     doc["discovery_enabled"] = discoveryEnabled;
+
+    // Paired-peer liveness (from heartbeats)
+    bool hasPeer = (currentMode == MODE_RELAY_RECEIVER && isPaired) ||
+                   (currentMode == MODE_DRY_CONTACT_SENDER && receiverIP.length() > 0);
+    doc["has_peer"] = hasPeer;
+    doc["peer_online"] = peerOnline;
     
     // Add channel names
     doc["channel_names"] = JsonArray();
