@@ -9,6 +9,7 @@
 #include <Preferences.h>
 
 #include "config.h"
+#include "Display.h"
 
 // Global variables
 ESP32WebServer server(WEB_PORT);
@@ -17,6 +18,9 @@ bool ethernetConnected = false;
 unsigned long lastHeartbeat = 0;
 unsigned long lastLedBlink = 0;
 bool ledState = false;
+
+// Display object
+Display display;
 
 // Mode-specific variables
 bool dryContactState = false;
@@ -28,6 +32,9 @@ unsigned long relayPulseEndTime = 0;
 String deviceID = "";
 String receiverIP = "";
 bool useTCP = false;  // false for UDP, true for TCP
+
+// Mode jumper state
+bool jumperModeDetected = false;
 
 // Function prototypes
 void setupHardware();
@@ -50,6 +57,7 @@ void processIncomingMessage(const String& message, const String& senderIP);
 void sendRelayCommand(const String& targetIP, bool activate);
 void setupDryContactSender();
 void setupRelayReceiver();
+void detectModeFromJumper();
 
 void setup() {
     Serial.begin(SERIAL_BAUD_RATE);
@@ -57,11 +65,20 @@ void setup() {
     Serial.println("Firmware Version: " FIRMWARE_VERSION);
     
     setupHardware();
+    detectModeFromJumper();
     loadConfiguration();
     generateDeviceID();
     
+    // Initialize display
+    if (display.init()) {
+        display.setDeviceID(deviceID);
+        display.setMode(currentMode);
+        display.showConnecting();
+    }
+    
     Serial.println("Device ID: " + deviceID);
     Serial.println("Operation Mode: " + String(currentMode));
+    Serial.println("Mode Jumper: " + String(jumperModeDetected ? "Detected" : "Not detected"));
     
     setupNetwork();
     setupWebServer();
@@ -88,6 +105,11 @@ void loop() {
     
     // Update status LED
     updateStatusLED();
+    
+    // Update display
+    if (display.isAvailable()) {
+        display.update();
+    }
     
     // Handle mode-specific operations
     switch (currentMode) {
@@ -116,6 +138,9 @@ void setupHardware() {
     // Initialize status LED
     pinMode(STATUS_LED_PIN, OUTPUT);
     digitalWrite(STATUS_LED_PIN, LOW);
+    
+    // Initialize mode jumper pin
+    pinMode(MODE_JUMPER_PIN, INPUT_PULLUP);
     
     // Initialize mode-specific pins
     pinMode(DRY_CONTACT_PIN, INPUT_PULLUP);
@@ -149,6 +174,13 @@ void setupNetwork() {
             Serial.println(" connected!");
             Serial.println("IP Address: " + ETH.localIP().toString());
             Serial.println("MAC Address: " + ETH.macAddress());
+            
+            // Update display with connection info
+            if (display.isAvailable()) {
+                display.setEthernetConnected(true);
+                display.setLocalIP(ETH.localIP().toString());
+                display.showConnected();
+            }
             
             // Start mDNS
             if (MDNS.begin(MDNS_NAME)) {
@@ -257,6 +289,30 @@ void setupRelayReceiver() {
     Serial.println("Configuring as Relay Receiver");
 }
 
+void detectModeFromJumper() {
+    Serial.println("Detecting mode from jumper...");
+    
+    // Read jumper state (LOW = Sender, HIGH = Receiver)
+    bool jumperState = digitalRead(MODE_JUMPER_PIN);
+    
+    if (jumperState == LOW) {
+        // Jumper is grounded (LOW) - Sender mode
+        currentMode = MODE_DRY_CONTACT_SENDER;
+        jumperModeDetected = true;
+        Serial.println("Jumper detected: LOW -> Sender mode");
+    } else {
+        // Jumper is open (HIGH) - Receiver mode
+        currentMode = MODE_RELAY_RECEIVER;
+        jumperModeDetected = true;
+        Serial.println("Jumper detected: HIGH -> Receiver mode");
+    }
+    
+    // Only override EEPROM if jumper is detected
+    if (jumperModeDetected) {
+        Serial.println("Mode set by jumper, overriding EEPROM setting");
+    }
+}
+
 void handleDryContact() {
     bool currentState = (digitalRead(DRY_CONTACT_PIN) == LOW);
     
@@ -267,6 +323,11 @@ void handleDryContact() {
             dryContactChangeTime = millis();
             
             Serial.println("Dry contact state changed: " + String(dryContactState ? "CLOSED" : "OPEN"));
+            
+            // Update display
+            if (display.isAvailable()) {
+                display.setInputState(dryContactState);
+            }
             
             // Send state change to receiver
             if (receiverIP.length() > 0) {
@@ -371,6 +432,9 @@ void processIncomingMessage(const String& message, const String& senderIP) {
                 digitalWrite(RELAY_PIN, HIGH); // Relay on
             }
             Serial.println("Relay activated");
+            if (display.isAvailable()) {
+                display.setOutputState(true);
+            }
         } else if (command == "relay_off") {
             relayState = false;
             if (RELAY_ACTIVE_LOW) {
@@ -379,6 +443,9 @@ void processIncomingMessage(const String& message, const String& senderIP) {
                 digitalWrite(RELAY_PIN, LOW);   // Relay off
             }
             Serial.println("Relay deactivated");
+            if (display.isAvailable()) {
+                display.setOutputState(false);
+            }
         }
     }
 }
@@ -409,7 +476,7 @@ void handleRoot() {
             <h3>Device Status</h3>
             <p><strong>Device ID:</strong> )" + deviceID + R"(</p>
             <p><strong>Firmware:</strong> )" + FIRMWARE_VERSION + R"(</p>
-            <p><strong>Mode:</strong> <span id="mode">)" + String(currentMode) + R"(</span></p>
+            <p><strong>Mode:</strong> <span id="mode">)" + String(currentMode) + R"(</span>)" + String(jumperModeDetected ? " (Jumper Set)" : "") + R"(</p>
             <p><strong>Ethernet:</strong> <span id="ethernet">)" + String(ethernetConnected ? "Connected" : "Disconnected") + R"(</span></p>
             <p><strong>IP Address:</strong> )" + ETH.localIP().toString() + R"(</p>
         </div>
@@ -463,6 +530,7 @@ void handleAPI() {
     doc["mode"] = currentMode;
     doc["mode_text"] = currentMode == MODE_DRY_CONTACT_SENDER ? "Dry Contact Sender" : 
                       currentMode == MODE_RELAY_RECEIVER ? "Relay Receiver" : "Not Configured";
+    doc["jumper_mode"] = jumperModeDetected;
     doc["ethernet_connected"] = ethernetConnected;
     doc["ip_address"] = ETH.localIP().toString();
     doc["mac_address"] = ETH.macAddress();

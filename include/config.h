@@ -27,6 +27,9 @@ enum OperationMode {
     MODE_RELAY_RECEIVER = 2
 };
 
+// Mode selection jumper
+#define MODE_JUMPER_PIN 16  // GPIO pin for mode selection jumper (LOW = Sender, HIGH = Receiver)
+
 // Dry contact sender configuration
 #define DRY_CONTACT_PIN 4  // GPIO pin for dry contact input
 #define DRY_CONTACT_DEBOUNCE_MS 50
@@ -36,6 +39,14 @@ enum OperationMode {
 #define RELAY_PIN 2  // GPIO pin for relay output
 #define RELAY_ACTIVE_LOW true  // Set to true if relay is active low
 #define RELAY_PULSE_MS 500  // Pulse duration for momentary relay activation
+
+// OLED Display configuration (128x64 SSD1306)
+#define OLED_WIDTH 128
+#define OLED_HEIGHT 64
+#define OLED_RESET -1  // Reset pin (-1 if sharing Arduino reset pin)
+#define OLED_SDA_PIN 21  // I2C SDA pin
+#define OLED_SCL_PIN 22  // I2C SCL pin
+#define OLED_ADDRESS 0x3C  // I2C address (0x3C for most 128x64 displays)
 
 // Communication protocol
 #define PROTOCOL_VERSION 1

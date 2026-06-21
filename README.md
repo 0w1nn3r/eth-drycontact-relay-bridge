@@ -8,6 +8,11 @@ A versatile Ethernet-based relay bridge using the Waveshare ESP32-P4-ETH board t
   - **Dry Contact Sender**: Monitors dry contact inputs and transmits state changes over Ethernet
   - **Relay Receiver**: Receives commands over Ethernet and controls relay outputs
 
+- **Hardware Interface**:
+  - **OLED Display**: 128x64 SSD1306 display showing device status, IP addresses, and I/O states
+  - **Mode Selection Jumper**: Hardware jumper on GPIO16 for mode selection (overrides software settings)
+  - **Real-time Status**: Visual feedback for input/output states and network connectivity
+
 - **Network Connectivity**:
   - Wired Ethernet via LAN8720 PHY
   - mDNS for device discovery
@@ -32,9 +37,12 @@ A versatile Ethernet-based relay bridge using the Waveshare ESP32-P4-ETH board t
 
 | Function | GPIO Pin | Description |
 |----------|----------|-------------|
+| Mode Jumper | GPIO16 | Mode selection (LOW=Sender, HIGH=Receiver) |
 | Dry Contact Input | GPIO4 | Digital input with internal pull-up |
 | Relay Output | GPIO2 | Digital output for relay control |
 | Status LED | GPIO5 | Onboard status indicator |
+| OLED SDA | GPIO21 | I2C data line for OLED display |
+| OLED SCL | GPIO22 | I2C clock line for OLED display |
 | Ethernet MDC | GPIO23 | Ethernet PHY management clock |
 | Ethernet MDIO | GPIO18 | Ethernet PHY management data |
 
@@ -87,6 +95,46 @@ A versatile Ethernet-based relay bridge using the Waveshare ESP32-P4-ETH board t
 - **Ports**: UDP 8888, TCP 8889 (configurable)
 - **Discovery**: UDP broadcast on port 8900 for device discovery
 - **Heartbeat**: Periodic status broadcasts every 30 seconds
+
+### OLED Display
+
+The 128x64 SSD1306 OLED display provides real-time status information:
+
+**Display Layout:**
+- **Header**: Mode icon and mode name (S=Sender, R=Receiver)
+- **Input/Output State**: 
+  - Sender mode: "INPUT: OPEN/CLOSED"
+  - Receiver mode: "RELAY: ON/OFF"
+- **Network Information**:
+  - "Local: xxx.xxx.xxx.xxx" - Device IP address
+  - "Remote: xxx.xxx.xxx.xxx" - Receiver IP (sender mode only)
+- **Status**: "Online/Offline" - Ethernet connection status
+- **Status Bar**: Device ID and "ETH" indicator
+
+**I2C Connections:**
+- SDA: GPIO21
+- SCL: GPIO22
+- Address: 0x3C (default for most 128x64 displays)
+
+### Mode Selection Jumper
+
+A hardware jumper on GPIO16 provides reliable mode selection:
+
+**Jumper Configuration:**
+- **Jumper to GND (LOW)**: Dry Contact Sender mode
+- **Jumper Open (HIGH)**: Relay Receiver mode
+- **Internal Pull-up**: Default state is HIGH (Receiver mode)
+
+**Priority:**
+- Hardware jumper overrides EEPROM/software settings
+- Mode is detected at startup and logged to serial
+- Web interface shows "(Jumper Set)" when hardware mode is active
+
+**Usage:**
+1. Install jumper pin on GPIO16 header
+2. Connect jumper to GND for Sender mode
+3. Leave jumper open for Receiver mode
+4. Power cycle device to apply mode change
 
 ## Usage Examples
 
