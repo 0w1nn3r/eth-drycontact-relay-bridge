@@ -1,13 +1,18 @@
 #ifndef STATELOGGER_H
 #define STATELOGGER_H
 
+#include "config.h"
 #include <Arduino.h>
 #include <Preferences.h>
 #include <ArduinoJson.h>
+#include <time.h>
+
+// Forward declaration
+class TimeManager;
 
 // Log entry structure
 struct LogEntry {
-    unsigned long timestamp;
+    time_t timestamp;  // Use proper time_t instead of millis
     int channel;  // 1 or 2
     String eventType;  // "DRY_CONTACT", "RELAY", "PAIRING"
     String deviceId;  // Device ID for pairing events
@@ -23,6 +28,7 @@ private:
     int totalEntries;
     Preferences preferences;
     unsigned long lastSaveTime;
+    TimeManager* timeManager;  // Pointer to TimeManager for real timestamps
     
     void saveLogToFlash();
     void loadLogFromFlash();
@@ -30,6 +36,7 @@ private:
     
 public:
     StateLogger();
+    void setTimeManager(TimeManager* tm) { timeManager = tm; }
     void begin();
     void logStateChange(int channel, const String& eventType, const String& oldValue, 
                        const String& newValue, const String& description = "");

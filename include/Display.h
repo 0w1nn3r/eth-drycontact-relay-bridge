@@ -46,6 +46,7 @@ public:
         channelNames[0] = name1; 
         channelNames[1] = name2; 
     }
+    void showFactoryReset();
     bool isAvailable() const { return displayAvailable; }
     
 private:

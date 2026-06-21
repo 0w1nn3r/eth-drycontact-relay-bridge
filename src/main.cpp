@@ -12,6 +12,7 @@
 #include "Display.h"
 #include "WebServer.h"
 #include "StateLogger.h"
+#include "TimeManager.h"
 
 // Global variables
 OperationMode currentMode = MODE_UNDEFINED;
@@ -19,6 +20,9 @@ bool ethernetConnected = false;
 unsigned long lastHeartbeat = 0;
 unsigned long lastLedBlink = 0;
 bool ledState = false;
+
+// Time management
+TimeManager timeManager;
 
 // Mode-specific variables (dual channel)
 bool dryContactState[2] = {false, false};
@@ -74,7 +78,7 @@ void handleDryContact();
 void handleRelay();
 void sendHeartbeat();
 void processIncomingMessage(const String& message, const String& senderIP);
-void sendRelayCommand(const String& targetIP, bool activate);
+void sendRelayCommand(const String& targetIP, int channel, bool activate);
 void setupDryContactSender();
 void setupRelayReceiver();
 void detectModeFromJumper();
@@ -121,9 +125,13 @@ void setup() {
     
     setupNetwork();
     
+    // Initialize time manager
+    timeManager.begin();
+    
     // Setup web server
     webServer.setDisplay(&display);
     webServer.setStateLogger(&stateLogger);
+    stateLogger.setTimeManager(&timeManager);
     webServer.setChannelNameSaveCallback([]() { saveChannelNames(); });
     webServer.begin();
     
@@ -193,6 +201,9 @@ void loop() {
     // Handle factory reset button
     handleFactoryResetButton();
     
+    // Update time manager
+    timeManager.update();
+    
     // Update state logger
     stateLogger.update();
     
@@ -243,7 +254,7 @@ void setupNetwork() {
     Serial.print("Connecting to Ethernet (DHCP)...");
     int retryCount = 0;
     while (!ethernetConnected && retryCount < 30) {
-        ethernetConnected = (ETH.linkStatus() == ETH_LINK_UP);
+        ethernetConnected = ETH.linkUp();
         if (ethernetConnected) {
             Serial.println(" connected!");
             
@@ -358,8 +369,10 @@ void saveConfiguration() {
 
 void setupDryContactSender() {
     Serial.println("Configuring as Dry Contact Sender");
-    dryContactState = (digitalRead(DRY_CONTACT_PIN) == LOW);
-    dryContactChangeTime = millis();
+    dryContactState[0] = (digitalRead(DRY_CONTACT_PIN_1) == LOW);
+    dryContactState[1] = (digitalRead(DRY_CONTACT_PIN_2) == LOW);
+    dryContactChangeTime[0] = millis();
+    dryContactChangeTime[1] = millis();
 }
 
 void setupRelayReceiver() {
@@ -643,14 +656,14 @@ void handleDiscoveryPacket() {
 }
 
 void pairWithDevice(const String& deviceID, const String& deviceIP) {
-    if (isPaired) {
+    if (isPaired[0]) {
         Serial.println("Already paired, ignoring new pairing request");
         return;
     }
     
-    isPaired = true;
-    pairedDeviceID = deviceID;
-    pairedDeviceIP = deviceIP;
+    isPaired[0] = true;
+    pairedDeviceID[0] = deviceID;
+    pairedDeviceIP[0] = deviceIP;
     receiverIP = deviceIP; // Update the receiver IP for sending commands
     
     savePairingSettings();
@@ -666,46 +679,46 @@ void pairWithDevice(const String& deviceID, const String& deviceIP) {
     JsonDocument doc;
     doc["type"] = "pairing_confirmation";
     doc["device_id"] = deviceID;
-    doc["paired_with"] = pairedDeviceID;
-    doc["paired_ip"] = pairedDeviceIP;
+    doc["paired_with"] = pairedDeviceID[0];
+    doc["paired_ip"] = pairedDeviceIP[0];
     doc["timestamp"] = millis();
     
     String message;
     serializeJson(doc, message);
     
-    udp.beginPacket(pairedDeviceIP.c_str(), DEVICE_DISCOVERY_PORT);
+    udp.beginPacket(pairedDeviceIP[0].c_str(), DEVICE_DISCOVERY_PORT);
     udp.print(message);
     udp.endPacket();
     
-    Serial.println("Sent pairing confirmation to " + pairedDeviceIP);
+    Serial.println("Sent pairing confirmation to " + pairedDeviceIP[0]);
 }
 
 void unpairDevice() {
-    if (!isPaired) {
+    if (!isPaired[0]) {
         Serial.println("No device paired to unpair");
         return;
     }
     
-    Serial.println("Unpairing device: " + pairedDeviceID);
+    Serial.println("Unpairing device: " + pairedDeviceID[0]);
     
     // Send unpairing notification
     JsonDocument doc;
     doc["type"] = "unpairing";
     doc["device_id"] = deviceID;
-    doc["unpairing_from"] = pairedDeviceID;
+    doc["unpairing_from"] = pairedDeviceID[0];
     doc["timestamp"] = millis();
     
     String message;
     serializeJson(doc, message);
     
-    udp.beginPacket(pairedDeviceIP.c_str(), DEVICE_DISCOVERY_PORT);
+    udp.beginPacket(pairedDeviceIP[0].c_str(), DEVICE_DISCOVERY_PORT);
     udp.print(message);
     udp.endPacket();
     
     // Clear pairing state
-    isPaired = false;
-    pairedDeviceID = "";
-    pairedDeviceIP = "";
+    isPaired[0] = false;
+    pairedDeviceID[0] = "";
+    pairedDeviceIP[0] = "";
     receiverIP = "";
     
     savePairingSettings();
@@ -722,17 +735,25 @@ void loadPairingSettings() {
     Preferences preferences;
     preferences.begin("pairing", false);
     
-    isPaired = preferences.getBool("is_paired", false);
-    pairedDeviceID = preferences.getString("paired_device_id", "");
-    pairedDeviceIP = preferences.getString("paired_device_ip", "");
+    isPaired[0] = preferences.getBool("is_paired_ch1", false);
+    isPaired[1] = preferences.getBool("is_paired_ch2", false);
+    pairedDeviceID[0] = preferences.getString("paired_device_id_ch1", "");
+    pairedDeviceID[1] = preferences.getString("paired_device_id_ch2", "");
+    pairedDeviceIP[0] = preferences.getString("paired_device_ip_ch1", "");
+    pairedDeviceIP[1] = preferences.getString("paired_device_ip_ch2", "");
     
-    if (isPaired && pairedDeviceID.length() > 0 && pairedDeviceIP.length() > 0) {
-        receiverIP = pairedDeviceIP; // Update receiver IP for communication
+    if (isPaired[0] && pairedDeviceID[0].length() > 0 && pairedDeviceIP[0].length() > 0) {
+        receiverIP = pairedDeviceIP[0]; // Update receiver IP for communication
         Serial.println("Loaded pairing settings:");
-        Serial.println("  Paired with: " + pairedDeviceID);
-        Serial.println("  Paired IP: " + pairedDeviceIP);
-    } else {
-        isPaired = false;
+        Serial.println("  CH1 Paired with: " + pairedDeviceID[0]);
+        Serial.println("  CH1 Paired IP: " + pairedDeviceIP[0]);
+    }
+    if (isPaired[1] && pairedDeviceID[1].length() > 0 && pairedDeviceIP[1].length() > 0) {
+        Serial.println("  CH2 Paired with: " + pairedDeviceID[1]);
+        Serial.println("  CH2 Paired IP: " + pairedDeviceIP[1]);
+    }
+    
+    if (!isPaired[0] && !isPaired[1]) {
         Serial.println("No pairing settings found");
     }
     
@@ -743,9 +764,12 @@ void savePairingSettings() {
     Preferences preferences;
     preferences.begin("pairing", false);
     
-    preferences.putBool("is_paired", isPaired);
-    preferences.putString("paired_device_id", pairedDeviceID);
-    preferences.putString("paired_device_ip", pairedDeviceIP);
+    preferences.putBool("is_paired_ch1", isPaired[0]);
+    preferences.putBool("is_paired_ch2", isPaired[1]);
+    preferences.putString("paired_device_id_ch1", pairedDeviceID[0]);
+    preferences.putString("paired_device_id_ch2", pairedDeviceID[1]);
+    preferences.putString("paired_device_ip_ch1", pairedDeviceIP[0]);
+    preferences.putString("paired_device_ip_ch2", pairedDeviceIP[1]);
     
     preferences.end();
     
@@ -825,7 +849,7 @@ void handleFactoryResetButton() {
         // Button just pressed
         factoryResetButtonPressed = true;
         factoryResetButtonPressTime = millis();
-        Serial.println("Factory reset button pressed - hold for " + String(FACTORY_RESET_HOLD_TIME_MS / 1000) + " seconds");
+        Serial.println("Factory reset button pressed - hold for " + String(FACTORY_RESET_HOLD_TIME_MS / 1000) + " seconds to reboot");
         
     } else if (!buttonPressed && factoryResetButtonPressed) {
         // Button released
@@ -833,13 +857,13 @@ void handleFactoryResetButton() {
         unsigned long holdTime = millis() - factoryResetButtonPressTime;
         
         if (holdTime >= FACTORY_RESET_HOLD_TIME_MS) {
-            Serial.println("Factory reset button held for " + String(holdTime / 1000) + " seconds - rebooting for factory reset!");
+            Serial.println("Factory reset button held for " + String(holdTime / 1000) + " seconds - rebooting!");
             delay(100); // Brief delay for serial output
             
-            // Reboot to trigger factory reset during boot
+            // Simple reboot (no factory reset)
             ESP.restart();
         } else {
-            Serial.println("Factory reset button released after " + String(holdTime / 1000) + " seconds - no reset");
+            Serial.println("Factory reset button released after " + String(holdTime / 1000) + " seconds - no action");
         }
     }
 }
@@ -876,13 +900,7 @@ void performFactoryReset() {
     
     // Blink LED to indicate factory reset
     if (display.isAvailable()) {
-        display.clear();
-        display.setTextSize(2);
-        display.setCursor(10, 20);
-        display.println("FACTORY");
-        display.setCursor(25, 40);
-        display.println("RESET");
-        display.display();
+        display.showFactoryReset();
         delay(2000);
     }
     

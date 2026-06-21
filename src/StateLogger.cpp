@@ -1,8 +1,13 @@
 #include "StateLogger.h"
 #include "config.h"
+#include "TimeManager.h"
 #include <LittleFS.h>
 
-StateLogger::StateLogger() : currentLogIndex(0), totalEntries(0), lastSaveTime(0) {
+StateLogger::StateLogger() : currentLogIndex(0), totalEntries(0), lastSaveTime(0), timeManager(nullptr) {
+    // Initialize log entries
+    for (int i = 0; i < MAX_LOG_ENTRIES; i++) {
+        logEntries[i] = LogEntry{};
+    }
 }
 
 void StateLogger::begin() {
@@ -14,7 +19,7 @@ void StateLogger::begin() {
 void StateLogger::logStateChange(int channel, const String& eventType, const String& oldValue, 
                                 const String& newValue, const String& description) {
     LogEntry entry;
-    entry.timestamp = millis();
+    entry.timestamp = timeManager ? timeManager->getCurrentTime() : (time_t)(millis() / 1000);
     entry.channel = channel;
     entry.eventType = eventType;
     entry.deviceId = "";
@@ -43,7 +48,7 @@ void StateLogger::logStateChange(int channel, const String& eventType, const Str
 
 void StateLogger::logPairingEvent(const String& eventType, const String& deviceId, const String& description) {
     LogEntry entry;
-    entry.timestamp = millis();
+    entry.timestamp = timeManager ? timeManager->getCurrentTime() : (time_t)(millis() / 1000);
     entry.channel = 0;  // System event
     entry.eventType = "PAIRING";
     entry.deviceId = deviceId;
@@ -72,7 +77,7 @@ void StateLogger::logPairingEvent(const String& eventType, const String& deviceI
 
 void StateLogger::logSystemEvent(const String& description) {
     LogEntry entry;
-    entry.timestamp = millis();
+    entry.timestamp = timeManager ? timeManager->getCurrentTime() : (time_t)(millis() / 1000);
     entry.channel = 0;  // System event
     entry.eventType = "SYSTEM";
     entry.deviceId = "";
@@ -188,7 +193,8 @@ String StateLogger::getRecentLogHTML(int maxEntries) {
         }
         
         // Event type
-        String eventClass = entry.eventType.toLowerCase();
+        String eventClass = entry.eventType;
+eventClass.toLowerCase();
         html += "<span class='log-event " + eventClass + "'>" + entry.eventType + "</span>";
         
         // Device ID

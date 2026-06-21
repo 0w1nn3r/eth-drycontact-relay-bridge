@@ -7,14 +7,6 @@
 #define BOARD_NAME "ESP32-P4-ETH Relay Bridge"
 #define FIRMWARE_VERSION "1.0.0"
 
-// Ethernet configuration
-#define ETH_PHY_TYPE ETH_PHY_LAN8720
-#define ETH_PHY_ADDR 0
-#define ETH_PHY_MDC_PIN 23
-#define ETH_PHY_MDIO_PIN 18
-#define ETH_PHY_POWER_PIN -1
-#define ETH_CLK_MODE ETH_CLK_GPIO0_IN
-
 // Network configuration
 #define DEFAULT_HOSTNAME "eth-relay-bridge"
 #define MDNS_NAME "eth-relay-bridge"

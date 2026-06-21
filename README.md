@@ -158,18 +158,20 @@ A hardware jumper on GPIO16 provides reliable mode selection:
 
 The device includes a factory reset feature to clear all saved settings and restore defaults:
 
-#### Factory Reset Methods
+#### Factory Reset Method
 
-**Method 1: Boot-Time Factory Reset**
+**Boot-Time Factory Reset**
 1. Hold the BOOT button (GPIO0) while powering on the device
 2. Continue holding for 2 seconds during boot
 3. Release the button after 2 seconds
 4. Device will perform factory reset and reboot
 
-**Method 2: Runtime Factory Reset**
-1. Press and hold the BOOT button (GPIO0) for 3 seconds
+#### Runtime Reboot
+
+**Soft Reboot (No Data Loss)**
+1. Press and hold the BOOT button (GPIO0) for 3 seconds while device is running
 2. Release the button after 3 seconds
-3. Device will reboot and perform factory reset during boot
+3. Device will reboot without clearing any data
 
 #### What Gets Cleared
 - All configuration settings (mode, network settings, etc.)

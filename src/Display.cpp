@@ -179,6 +179,19 @@ void Display::drawStateInfo() {
     }
 }
 
+void Display::showFactoryReset() {
+    if (!displayAvailable) return;
+    
+    display.clearDisplay();
+    display.setTextSize(2);
+    display.setTextColor(SSD1306_WHITE);
+    display.setCursor(10, 20);
+    display.println("FACTORY");
+    display.setCursor(25, 40);
+    display.println("RESET");
+    display.display();
+}
+
 void Display::drawStatusBar() {
     // Bottom status bar
     display.drawLine(0, OLED_HEIGHT - 9, OLED_WIDTH - 1, OLED_HEIGHT - 9, SSD1306_WHITE);
