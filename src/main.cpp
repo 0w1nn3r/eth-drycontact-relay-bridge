@@ -1,6 +1,7 @@
 #include <Arduino.h>
 #include <ETH.h>
 #include <WiFi.h>
+#include <WiFiUdp.h>
 #include <ESP32WebServer.h>
 #include <ArduinoJson.h>
 #include <ESPmDNS.h>
@@ -36,6 +37,17 @@ bool useTCP = false;  // false for UDP, true for TCP
 // Mode jumper state
 bool jumperModeDetected = false;
 
+// UDP for network discovery
+WiFiUDP udp;
+
+// Pairing state
+bool isPaired = false;
+String pairedDeviceID = "";
+String pairedDeviceIP = "";
+unsigned long lastDiscoveryBroadcast = 0;
+unsigned long lastDiscoveryScan = 0;
+bool discoveryEnabled = true;
+
 // Function prototypes
 void setupHardware();
 void setupNetwork();
@@ -58,6 +70,13 @@ void sendRelayCommand(const String& targetIP, bool activate);
 void setupDryContactSender();
 void setupRelayReceiver();
 void detectModeFromJumper();
+void sendDiscoveryBroadcast();
+void scanForSenders();
+void handleDiscoveryPacket();
+void pairWithDevice(const String& deviceID, const String& deviceIP);
+void unpairDevice();
+void loadPairingSettings();
+void savePairingSettings();
 
 void setup() {
     Serial.begin(SERIAL_BAUD_RATE);
@@ -68,6 +87,7 @@ void setup() {
     detectModeFromJumper();
     loadConfiguration();
     generateDeviceID();
+    loadPairingSettings();
     
     // Initialize display
     if (display.init()) {
@@ -129,6 +149,23 @@ void loop() {
         lastHeartbeat = millis();
     }
     
+    // Handle discovery and pairing
+    if (ethernetConnected && discoveryEnabled) {
+        if (currentMode == MODE_DRY_CONTACT_SENDER) {
+            // Senders broadcast their presence every 10 seconds
+            if (millis() - lastDiscoveryBroadcast > 10000) {
+                sendDiscoveryBroadcast();
+                lastDiscoveryBroadcast = millis();
+            }
+        } else if (currentMode == MODE_RELAY_RECEIVER && !isPaired) {
+            // Receivers scan for senders every 5 seconds until paired
+            if (millis() - lastDiscoveryScan > 5000) {
+                scanForSenders();
+                lastDiscoveryScan = millis();
+            }
+        }
+    }
+    
     delay(10);
 }
 
@@ -160,35 +197,53 @@ void setupHardware() {
 }
 
 void setupNetwork() {
-    Serial.println("Initializing Ethernet...");
+    Serial.println("Initializing Ethernet with DHCP...");
     
-    // Configure Ethernet
+    // Configure Ethernet with explicit DHCP settings
     ETH.begin();
     
-    // Wait for Ethernet connection
-    Serial.print("Connecting to Ethernet...");
+    // Wait for Ethernet connection and DHCP assignment
+    Serial.print("Connecting to Ethernet (DHCP)...");
     int retryCount = 0;
     while (!ethernetConnected && retryCount < 30) {
         ethernetConnected = (ETH.linkStatus() == ETH_LINK_UP);
         if (ethernetConnected) {
             Serial.println(" connected!");
-            Serial.println("IP Address: " + ETH.localIP().toString());
-            Serial.println("MAC Address: " + ETH.macAddress());
             
-            // Update display with connection info
-            if (display.isAvailable()) {
-                display.setEthernetConnected(true);
-                display.setLocalIP(ETH.localIP().toString());
-                display.showConnected();
+            // Wait for DHCP to complete
+            int dhcpRetry = 0;
+            while (ETH.localIP().toString() == "0.0.0.0" && dhcpRetry < 10) {
+                Serial.print("Waiting for DHCP...");
+                delay(1000);
+                dhcpRetry++;
             }
             
-            // Start mDNS
-            if (MDNS.begin(MDNS_NAME)) {
-                Serial.println("mDNS responder started");
-                MDNS.addService("http", "tcp", WEB_PORT);
-                MDNS.addService("eth-relay", "udp", UDP_PORT);
+            if (ETH.localIP().toString() != "0.0.0.0") {
+                Serial.println(" DHCP successful!");
+                Serial.println("IP Address: " + ETH.localIP().toString());
+                Serial.println("Subnet Mask: " + ETH.subnetMask().toString());
+                Serial.println("Gateway: " + ETH.gatewayIP().toString());
+                Serial.println("DNS Server: " + ETH.dnsIP().toString());
+                Serial.println("MAC Address: " + ETH.macAddress());
+                
+                // Update display with connection info
+                if (display.isAvailable()) {
+                    display.setEthernetConnected(true);
+                    display.setLocalIP(ETH.localIP().toString());
+                    display.showConnected();
+                }
+                
+                // Start mDNS
+                if (MDNS.begin(MDNS_NAME)) {
+                    Serial.println("mDNS responder started");
+                    MDNS.addService("http", "tcp", WEB_PORT);
+                    MDNS.addService("eth-relay", "udp", UDP_PORT);
+                } else {
+                    Serial.println("Error setting up MDNS responder!");
+                }
             } else {
-                Serial.println("Error setting up MDNS responder!");
+                Serial.println(" DHCP failed!");
+                ethernetConnected = false;
             }
         } else {
             Serial.print(".");
@@ -479,6 +534,12 @@ void handleRoot() {
             <p><strong>Mode:</strong> <span id="mode">)" + String(currentMode) + R"(</span>)" + String(jumperModeDetected ? " (Jumper Set)" : "") + R"(</p>
             <p><strong>Ethernet:</strong> <span id="ethernet">)" + String(ethernetConnected ? "Connected" : "Disconnected") + R"(</span></p>
             <p><strong>IP Address:</strong> )" + ETH.localIP().toString() + R"(</p>
+            <p><strong>Subnet Mask:</strong> )" + ETH.subnetMask().toString() + R"(</p>
+            <p><strong>Gateway:</strong> )" + ETH.gatewayIP().toString() + R"(</p>
+            <p><strong>DNS Server:</strong> )" + ETH.dnsIP().toString() + R"(</p>
+            <p><strong>Paired:</strong> <span id="paired-status">)" + String(isPaired ? "Yes" : "No") + R"(</span></p>
+            <p><strong>Paired Device:</strong> <span id="paired-device">)" + (isPaired ? pairedDeviceID : "None") + R"(</span></p>
+            <p><strong>Paired IP:</strong> <span id="paired-ip">)" + (isPaired ? pairedDeviceIP : "None") + R"(</span></p>
         </div>
         
         <div class="form-group">
@@ -501,6 +562,14 @@ void handleRoot() {
                 <br><br>
                 <button type="submit" class="button">Save Configuration</button>
             </form>
+            <br>
+            <div class="pairing-controls">
+                <h3>Pairing Management</h3>
+                <button type="button" class="button" onclick="toggleDiscovery()" id="discovery-btn">)" + String(discoveryEnabled ? "Disable Discovery" : "Enable Discovery") + R"(</button>
+                <br><br>
+                )" + String(currentMode == MODE_RELAY_RECEIVER && !isPaired ? "<button type=\"button\" class=\"button\" onclick=\"scanForSenders()\" style=\"background-color: #ff9800;\">Scan for Senders</button>" : "") + R"(
+                )" + String(isPaired ? "<button type=\"button\" class=\"button\" onclick=\"unpairDevice()\" style=\"background-color: #f44336;\">Unpair Device</button>" : "") + R"(
+            </div>
         </div>
     </div>
     
@@ -512,9 +581,62 @@ void handleRoot() {
                 .then(data => {
                     document.getElementById('mode').textContent = data.mode_text || 'Unknown';
                     document.getElementById('ethernet').textContent = data.ethernet_connected ? 'Connected' : 'Disconnected';
+                    
+                    // Update pairing status
+                    document.getElementById('paired-status').textContent = data.is_paired ? 'Yes' : 'No';
+                    document.getElementById('paired-device').textContent = data.paired_device_id || 'None';
+                    document.getElementById('paired-ip').textContent = data.paired_device_ip || 'None';
+                    
+                    // Update discovery button
+                    document.getElementById('discovery-btn').textContent = data.discovery_enabled ? 'Disable Discovery' : 'Enable Discovery';
                 })
                 .catch(error => console.log('Error:', error));
         }, 2000);
+        
+        function toggleDiscovery() {
+            fetch('/api', {
+                method: 'POST',
+                headers: {'Content-Type': 'application/json'},
+                body: JSON.stringify({action: 'toggle_discovery'})
+            })
+            .then(response => response.json())
+            .then(data => {
+                console.log('Discovery toggled:', data);
+                location.reload(); // Reload to update UI
+            })
+            .catch(error => console.log('Error:', error));
+        }
+        
+        function scanForSenders() {
+            document.getElementById('paired-device').textContent = 'Scanning...';
+            fetch('/api', {
+                method: 'POST',
+                headers: {'Content-Type': 'application/json'},
+                body: JSON.stringify({action: 'scan_senders'})
+            })
+            .then(response => response.json())
+            .then(data => {
+                console.log('Scan completed:', data);
+                setTimeout(() => location.reload(), 3000); // Reload after scan
+            })
+            .catch(error => console.log('Error:', error));
+        }
+        
+        function unpairDevice() {
+            if (confirm('Are you sure you want to unpair this device?')) {
+                fetch('/api', {
+                    method: 'POST',
+                    headers: {'Content-Type': 'application/json'},
+                    body: JSON.stringify({action: 'unpair_device'})
+                })
+                .then(response => response.json())
+                .then(data => {
+                    console.log('Device unpaired:', data);
+                    location.reload(); // Reload to update UI
+                })
+                .catch(error => console.log('Error:', error));
+            }
+        }
     </script>
 </body>
 </html>
@@ -524,6 +646,49 @@ void handleRoot() {
 }
 
 void handleAPI() {
+    // Handle pairing management POST requests
+    if (server.method() == HTTP_POST) {
+        String body = server.arg("plain");
+        JsonDocument requestDoc;
+        DeserializationError error = deserializeJson(requestDoc, body);
+        
+        if (!error) {
+            String postAction = requestDoc["action"] | "";
+            
+            if (postAction == "toggle_discovery") {
+                discoveryEnabled = !discoveryEnabled;
+                JsonDocument response;
+                response["status"] = "success";
+                response["discovery_enabled"] = discoveryEnabled;
+                String resp;
+                serializeJson(response, resp);
+                server.send(200, "application/json", resp);
+                return;
+            } else if (postAction == "scan_senders") {
+                if (currentMode == MODE_RELAY_RECEIVER && !isPaired) {
+                    scanForSenders();
+                }
+                JsonDocument response;
+                response["status"] = "success";
+                response["message"] = "Scan completed";
+                String resp;
+                serializeJson(response, resp);
+                server.send(200, "application/json", resp);
+                return;
+            } else if (postAction == "unpair_device") {
+                unpairDevice();
+                JsonDocument response;
+                response["status"] = "success";
+                response["message"] = "Device unpaired";
+                String resp;
+                serializeJson(response, resp);
+                server.send(200, "application/json", resp);
+                return;
+            }
+        }
+    }
+    
+    // Handle GET requests for status
     JsonDocument doc;
     doc["device_id"] = deviceID;
     doc["firmware_version"] = FIRMWARE_VERSION;
@@ -533,6 +698,9 @@ void handleAPI() {
     doc["jumper_mode"] = jumperModeDetected;
     doc["ethernet_connected"] = ethernetConnected;
     doc["ip_address"] = ETH.localIP().toString();
+    doc["subnet_mask"] = ETH.subnetMask().toString();
+    doc["gateway"] = ETH.gatewayIP().toString();
+    doc["dns_server"] = ETH.dnsIP().toString();
     doc["mac_address"] = ETH.macAddress();
     doc["uptime"] = millis() / 1000;
     doc["free_heap"] = ESP.getFreeHeap();
@@ -544,6 +712,12 @@ void handleAPI() {
     } else if (currentMode == MODE_RELAY_RECEIVER) {
         doc["relay_state"] = relayState;
     }
+    
+    // Add pairing information
+    doc["is_paired"] = isPaired;
+    doc["paired_device_id"] = pairedDeviceID;
+    doc["paired_device_ip"] = pairedDeviceIP;
+    doc["discovery_enabled"] = discoveryEnabled;
     
     String response;
     serializeJson(doc, response);
@@ -634,4 +808,186 @@ void handleDiscovery() {
     String response;
     serializeJson(doc, response);
     server.send(200, "application/json", response);
+}
+
+// Discovery and pairing functions
+void sendDiscoveryBroadcast() {
+    JsonDocument doc;
+    doc["type"] = "discovery";
+    doc["device_id"] = deviceID;
+    doc["mode"] = currentMode;
+    doc["mode_text"] = currentMode == MODE_DRY_CONTACT_SENDER ? "Sender" : "Receiver";
+    doc["ip_address"] = ETH.localIP().toString();
+    doc["firmware_version"] = FIRMWARE_VERSION;
+    doc["protocol_version"] = PROTOCOL_VERSION;
+    doc["timestamp"] = millis();
+    
+    String message;
+    serializeJson(doc, message);
+    
+    // Broadcast discovery message
+    udp.beginPacket("255.255.255.255", DEVICE_DISCOVERY_PORT);
+    udp.print(message);
+    udp.endPacket();
+    
+    Serial.println("Discovery broadcast sent: " + message);
+}
+
+void scanForSenders() {
+    Serial.println("Scanning for senders...");
+    
+    // Listen for discovery responses
+    udp.begin(DEVICE_DISCOVERY_PORT);
+    
+    unsigned long scanStart = millis();
+    while (millis() - scanStart < 3000) { // Scan for 3 seconds
+        int packetSize = udp.parsePacket();
+        if (packetSize > 0) {
+            char packetBuffer[512];
+            int len = udp.read(packetBuffer, packetSize - 1);
+            packetBuffer[len] = '\0';
+            
+            String message = String(packetBuffer);
+            Serial.println("Received discovery packet: " + message);
+            
+            handleDiscoveryPacket();
+        }
+        delay(10);
+    }
+    
+    udp.stop();
+}
+
+void handleDiscoveryPacket() {
+    JsonDocument doc;
+    DeserializationError error = deserializeJson(doc, udp);
+    
+    if (error) {
+        Serial.println("Error parsing discovery packet: " + String(error.c_str()));
+        return;
+    }
+    
+    String type = doc["type"] | "";
+    String senderDeviceID = doc["device_id"] | "";
+    int senderMode = doc["mode"] | -1;
+    String senderIP = doc["ip_address"] | "";
+    
+    // Only process sender discovery packets if we're an unpaired receiver
+    if (currentMode == MODE_RELAY_RECEIVER && !isPaired && 
+        type == "discovery" && senderMode == MODE_DRY_CONTACT_SENDER && 
+        senderDeviceID.length() > 0 && senderIP.length() > 0) {
+        
+        Serial.println("Found sender: " + senderDeviceID + " at " + senderIP);
+        pairWithDevice(senderDeviceID, senderIP);
+    }
+}
+
+void pairWithDevice(const String& deviceID, const String& deviceIP) {
+    if (isPaired) {
+        Serial.println("Already paired, ignoring new pairing request");
+        return;
+    }
+    
+    isPaired = true;
+    pairedDeviceID = deviceID;
+    pairedDeviceIP = deviceIP;
+    receiverIP = deviceIP; // Update the receiver IP for sending commands
+    
+    savePairingSettings();
+    
+    Serial.println("Paired with sender: " + deviceID + " at " + deviceIP);
+    
+    // Update display
+    if (display.isAvailable()) {
+        display.setRemoteIP(deviceIP);
+    }
+    
+    // Send pairing confirmation
+    JsonDocument doc;
+    doc["type"] = "pairing_confirmation";
+    doc["device_id"] = deviceID;
+    doc["paired_with"] = pairedDeviceID;
+    doc["paired_ip"] = pairedDeviceIP;
+    doc["timestamp"] = millis();
+    
+    String message;
+    serializeJson(doc, message);
+    
+    udp.beginPacket(pairedDeviceIP.c_str(), DEVICE_DISCOVERY_PORT);
+    udp.print(message);
+    udp.endPacket();
+    
+    Serial.println("Sent pairing confirmation to " + pairedDeviceIP);
+}
+
+void unpairDevice() {
+    if (!isPaired) {
+        Serial.println("No device paired to unpair");
+        return;
+    }
+    
+    Serial.println("Unpairing device: " + pairedDeviceID);
+    
+    // Send unpairing notification
+    JsonDocument doc;
+    doc["type"] = "unpairing";
+    doc["device_id"] = deviceID;
+    doc["unpairing_from"] = pairedDeviceID;
+    doc["timestamp"] = millis();
+    
+    String message;
+    serializeJson(doc, message);
+    
+    udp.beginPacket(pairedDeviceIP.c_str(), DEVICE_DISCOVERY_PORT);
+    udp.print(message);
+    udp.endPacket();
+    
+    // Clear pairing state
+    isPaired = false;
+    pairedDeviceID = "";
+    pairedDeviceIP = "";
+    receiverIP = "";
+    
+    savePairingSettings();
+    
+    // Update display
+    if (display.isAvailable()) {
+        display.setRemoteIP("");
+    }
+    
+    Serial.println("Device unpaired successfully");
+}
+
+void loadPairingSettings() {
+    Preferences preferences;
+    preferences.begin("pairing", false);
+    
+    isPaired = preferences.getBool("is_paired", false);
+    pairedDeviceID = preferences.getString("paired_device_id", "");
+    pairedDeviceIP = preferences.getString("paired_device_ip", "");
+    
+    if (isPaired && pairedDeviceID.length() > 0 && pairedDeviceIP.length() > 0) {
+        receiverIP = pairedDeviceIP; // Update receiver IP for communication
+        Serial.println("Loaded pairing settings:");
+        Serial.println("  Paired with: " + pairedDeviceID);
+        Serial.println("  Paired IP: " + pairedDeviceIP);
+    } else {
+        isPaired = false;
+        Serial.println("No pairing settings found");
+    }
+    
+    preferences.end();
+}
+
+void savePairingSettings() {
+    Preferences preferences;
+    preferences.begin("pairing", false);
+    
+    preferences.putBool("is_paired", isPaired);
+    preferences.putString("paired_device_id", pairedDeviceID);
+    preferences.putString("paired_device_ip", pairedDeviceIP);
+    
+    preferences.end();
+    
+    Serial.println("Pairing settings saved");
 }

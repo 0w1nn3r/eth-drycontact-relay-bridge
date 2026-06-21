@@ -91,10 +91,21 @@ A versatile Ethernet-based relay bridge using the Waveshare ESP32-P4-ETH board t
 
 ### Network Configuration
 
+- **DHCP**: Automatic IP address assignment via DHCP
 - **Protocol**: Choose between UDP (fast, lightweight) or TCP (reliable)
 - **Ports**: UDP 8888, TCP 8889 (configurable)
 - **Discovery**: UDP broadcast on port 8900 for device discovery
 - **Heartbeat**: Periodic status broadcasts every 30 seconds
+
+#### DHCP Information
+The device automatically obtains network configuration via DHCP:
+- **IP Address**: Assigned automatically from DHCP server
+- **Subnet Mask**: Configured automatically
+- **Gateway**: Default gateway assigned automatically  
+- **DNS Server**: DNS server assigned automatically
+- **Fallback**: Continues without network if DHCP fails
+
+The web interface displays all DHCP-assigned network information for troubleshooting and configuration verification.
 
 ### OLED Display
 
