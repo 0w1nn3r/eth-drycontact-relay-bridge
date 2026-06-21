@@ -48,6 +48,16 @@ enum OperationMode {
 #define LOG_FLASH_SECTOR 0  // Flash sector for log storage
 #define LOG_SAVE_INTERVAL_MS 30000  // Save log to flash every 30 seconds
 
+// Channel naming configuration
+#define MAX_CHANNEL_NAME_LENGTH 15  // Maximum length for channel names
+#define DEFAULT_CHANNEL1_NAME "Channel1"
+#define DEFAULT_CHANNEL2_NAME "Channel2"
+
+// Factory reset configuration
+#define FACTORY_RESET_PIN 0  // GPIO pin for factory reset button (BOOT button on ESP32)
+#define FACTORY_RESET_HOLD_TIME_MS 3000  // 3 seconds hold to trigger reset
+#define FACTORY_RESET_BOOT_DETECTION_TIME_MS 2000  // Hold during boot for 2 seconds to factory reset
+
 // OLED Display configuration (128x64 SSD1306)
 #define OLED_WIDTH 128
 #define OLED_HEIGHT 64

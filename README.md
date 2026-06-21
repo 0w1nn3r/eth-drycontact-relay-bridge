@@ -40,6 +40,7 @@ A versatile Ethernet-based relay bridge using the Waveshare ESP32-P4-ETH board t
 | Function | GPIO Pin | Description |
 |----------|----------|-------------|
 | Mode Jumper | GPIO16 | Mode selection (LOW=Sender, HIGH=Receiver) |
+| Factory Reset Button | GPIO0 | BOOT button for factory reset (3-second hold) |
 | Dry Contact Input 1 | GPIO4 | Digital input with internal pull-up (Channel 1) |
 | Dry Contact Input 2 | GPIO12 | Digital input with internal pull-up (Channel 2) |
 | Relay Output 1 | GPIO2 | Digital output for relay control (Channel 1) |
@@ -152,6 +153,41 @@ A hardware jumper on GPIO16 provides reliable mode selection:
 2. Connect jumper to GND for Sender mode
 3. Leave jumper open for Receiver mode
 4. Power cycle device to apply mode change
+
+### Factory Reset
+
+The device includes a factory reset feature to clear all saved settings and restore defaults:
+
+#### Factory Reset Methods
+
+**Method 1: Boot-Time Factory Reset**
+1. Hold the BOOT button (GPIO0) while powering on the device
+2. Continue holding for 2 seconds during boot
+3. Release the button after 2 seconds
+4. Device will perform factory reset and reboot
+
+**Method 2: Runtime Factory Reset**
+1. Press and hold the BOOT button (GPIO0) for 3 seconds
+2. Release the button after 3 seconds
+3. Device will reboot and perform factory reset during boot
+
+#### What Gets Cleared
+- All configuration settings (mode, network settings, etc.)
+- Pairing information and device associations
+- Custom channel names
+- State change logs
+- All preferences and saved data
+
+#### Visual Indicators
+- **OLED Display**: Shows "FACTORY RESET" message during reset
+- **Status LED**: Blinks 5 times to indicate factory reset in progress
+- **Serial Output**: Detailed reset messages for debugging
+
+#### After Factory Reset
+- Device reboots with default settings
+- Channel names revert to "Channel1" and "Channel2"
+- All pairing information is cleared
+- Device must be reconfigured and re-paired
 
 ### Enhanced Web Interface
 

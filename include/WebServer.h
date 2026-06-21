@@ -34,6 +34,9 @@ private:
     bool& discoveryEnabled;
     bool* dryContactState;
     bool* relayState;
+    String& channel1Name;
+    String& channel2Name;
+    std::function<void()> saveChannelNamesCallback;
     
     // Web server handlers
     void handleRoot();
@@ -49,6 +52,7 @@ private:
     void handleScanSenders();
     void handlePairWithSender();
     void handleUnpairChannel();
+    void handleChannelNames();
     
     // Helper methods
     String generateRootHTML();
@@ -59,10 +63,12 @@ public:
     WebServer(String& deviceID, OperationMode& currentMode, bool& ethernetConnected,
               bool& jumperModeDetected, bool& isPaired, String& pairedDeviceID,
               String& pairedDeviceIP, String& receiverIP, bool& useTCP,
-              bool& discoveryEnabled, bool* dryContactState, bool* relayState);
+              bool& discoveryEnabled, bool* dryContactState, bool* relayState,
+              String& channel1Name, String& channel2Name);
     
     void setDisplay(Display* displayPtr) { display = displayPtr; }
     void setStateLogger(StateLogger* loggerPtr) { stateLogger = loggerPtr; }
+    void setChannelNameSaveCallback(std::function<void()> callback) { saveChannelNamesCallback = callback; }
     void begin();
     void handleClient();
     

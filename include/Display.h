@@ -22,6 +22,7 @@ private:
     bool inputState[2];     // For sender: dry contact state for channels 1 & 2
     bool outputState[2];    // For receiver: relay state for channels 1 & 2
     bool ethernetConnected;
+    String channelNames[2]; // Custom channel names
     
 public:
     Display();
@@ -41,6 +42,10 @@ public:
         if (channel >= 1 && channel <= 2) outputState[channel - 1] = state; 
     }
     void setEthernetConnected(bool connected) { ethernetConnected = connected; }
+    void setChannelNames(const String& name1, const String& name2) { 
+        channelNames[0] = name1; 
+        channelNames[1] = name2; 
+    }
     bool isAvailable() const { return displayAvailable; }
     
 private:

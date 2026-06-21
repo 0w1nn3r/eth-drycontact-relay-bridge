@@ -10,6 +10,8 @@ Display::Display() : display(OLED_WIDTH, OLED_HEIGHT, &Wire, OLED_RESET),
     inputState[1] = false;
     outputState[0] = false;
     outputState[1] = false;
+    channelNames[0] = "CH1";
+    channelNames[1] = "CH2";
 }
 
 bool Display::init() {
@@ -135,13 +137,13 @@ void Display::drawModeInfo() {
     display.setCursor(0, 16);
     
     if (currentMode == MODE_DRY_CONTACT_SENDER) {
-        display.println("CH1: " + String(inputState[0] ? "CLOSED" : "OPEN"));
+        display.println(channelNames[0] + ": " + String(inputState[0] ? "CLOSED" : "OPEN"));
         display.setCursor(0, 24);
-        display.println("CH2: " + String(inputState[1] ? "CLOSED" : "OPEN"));
+        display.println(channelNames[1] + ": " + String(inputState[1] ? "CLOSED" : "OPEN"));
     } else if (currentMode == MODE_RELAY_RECEIVER) {
-        display.println("CH1: " + String(outputState[0] ? "ON" : "OFF"));
+        display.println(channelNames[0] + ": " + String(outputState[0] ? "ON" : "OFF"));
         display.setCursor(0, 24);
-        display.println("CH2: " + String(outputState[1] ? "ON" : "OFF"));
+        display.println(channelNames[1] + ": " + String(outputState[1] ? "ON" : "OFF"));
     } else {
         display.println("Mode: Not Set");
     }

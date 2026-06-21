@@ -48,11 +48,20 @@ bool discoveryEnabled = true;
 // State logger
 StateLogger stateLogger;
 
+// Channel names
+String channel1Name = DEFAULT_CHANNEL1_NAME;
+String channel2Name = DEFAULT_CHANNEL2_NAME;
+
+// Factory reset button
+unsigned long factoryResetButtonPressTime = 0;
+bool factoryResetButtonPressed = false;
+bool factoryResetBootDetection = false;
+
 // Display and Web server objects
 Display display;
 WebServer webServer(deviceID, currentMode, ethernetConnected, jumperModeDetected,
                    isPaired[0], pairedDeviceID[0], pairedDeviceIP[0], receiverIP, useTCP,
-                   discoveryEnabled, dryContactState, relayState);
+                   discoveryEnabled, dryContactState, relayState, channel1Name, channel2Name);
 
 // Function prototypes
 void setupHardware();
@@ -76,6 +85,11 @@ void pairWithDevice(const String& deviceID, const String& deviceIP);
 void unpairDevice();
 void loadPairingSettings();
 void savePairingSettings();
+void loadChannelNames();
+void saveChannelNames();
+void checkFactoryReset();
+void performFactoryReset();
+void handleFactoryResetButton();
 
 void setup() {
     Serial.begin(SERIAL_BAUD_RATE);
@@ -84,9 +98,11 @@ void setup() {
     
     setupHardware();
     detectModeFromJumper();
+    checkFactoryReset();  // Check for factory reset button during boot
     loadConfiguration();
     generateDeviceID();
     loadPairingSettings();
+    loadChannelNames();
     
     // Initialize state logger
     stateLogger.begin();
@@ -95,6 +111,7 @@ void setup() {
     if (display.init()) {
         display.setDeviceID(deviceID);
         display.setMode(currentMode);
+        display.setChannelNames(channel1Name, channel2Name);
         display.showConnecting();
     }
     
@@ -107,6 +124,7 @@ void setup() {
     // Setup web server
     webServer.setDisplay(&display);
     webServer.setStateLogger(&stateLogger);
+    webServer.setChannelNameSaveCallback([]() { saveChannelNames(); });
     webServer.begin();
     
     // Initialize mode-specific functionality
@@ -172,6 +190,9 @@ void loop() {
         }
     }
     
+    // Handle factory reset button
+    handleFactoryResetButton();
+    
     // Update state logger
     stateLogger.update();
     
@@ -187,6 +208,9 @@ void setupHardware() {
     
     // Initialize mode jumper pin
     pinMode(MODE_JUMPER_PIN, INPUT_PULLUP);
+    
+    // Initialize factory reset button (BOOT button)
+    pinMode(FACTORY_RESET_PIN, INPUT_PULLUP);
     
     // Initialize mode-specific pins (dual channel)
     pinMode(DRY_CONTACT_PIN_1, INPUT_PULLUP);
@@ -726,4 +750,150 @@ void savePairingSettings() {
     preferences.end();
     
     Serial.println("Pairing settings saved");
+}
+
+void loadChannelNames() {
+    Preferences preferences;
+    preferences.begin("channel_names", false);
+    
+    channel1Name = preferences.getString("channel1_name", DEFAULT_CHANNEL1_NAME);
+    channel2Name = preferences.getString("channel2_name", DEFAULT_CHANNEL2_NAME);
+    
+    // Validate names (ensure they're one word and not too long)
+    channel1Name.trim();
+    channel2Name.trim();
+    
+    if (channel1Name.length() > MAX_CHANNEL_NAME_LENGTH || channel1Name.indexOf(' ') >= 0) {
+        channel1Name = DEFAULT_CHANNEL1_NAME;
+    }
+    if (channel2Name.length() > MAX_CHANNEL_NAME_LENGTH || channel2Name.indexOf(' ') >= 0) {
+        channel2Name = DEFAULT_CHANNEL2_NAME;
+    }
+    
+    preferences.end();
+    Serial.println("Channel names loaded: CH1='" + channel1Name + "' CH2='" + channel2Name + "'");
+}
+
+void saveChannelNames() {
+    Preferences preferences;
+    preferences.begin("channel_names", false);
+    
+    preferences.putString("channel1_name", channel1Name);
+    preferences.putString("channel2_name", channel2Name);
+    
+    preferences.end();
+    Serial.println("Channel names saved: CH1='" + channel1Name + "' CH2='" + channel2Name + "'");
+    
+    // Update display with new channel names
+    if (display.isAvailable()) {
+        display.setChannelNames(channel1Name, channel2Name);
+    }
+}
+
+void checkFactoryReset() {
+    Serial.println("Checking for factory reset button during boot...");
+    
+    // Check if factory reset button is pressed during boot
+    bool buttonPressed = (digitalRead(FACTORY_RESET_PIN) == LOW);
+    
+    if (buttonPressed) {
+        Serial.println("Factory reset button detected during boot - checking hold time...");
+        
+        unsigned long startTime = millis();
+        bool stillPressed = true;
+        
+        // Check if button is held for the required time
+        while (stillPressed && (millis() - startTime < FACTORY_RESET_BOOT_DETECTION_TIME_MS)) {
+            stillPressed = (digitalRead(FACTORY_RESET_PIN) == LOW);
+            delay(10);
+        }
+        
+        if (stillPressed) {
+            Serial.println("Factory reset button held for " + String(FACTORY_RESET_BOOT_DETECTION_TIME_MS / 1000) + 
+                          " seconds during boot - performing factory reset!");
+            performFactoryReset();
+        } else {
+            Serial.println("Factory reset button released too early - continuing normal boot");
+        }
+    }
+}
+
+void handleFactoryResetButton() {
+    bool buttonPressed = (digitalRead(FACTORY_RESET_PIN) == LOW);
+    
+    if (buttonPressed && !factoryResetButtonPressed) {
+        // Button just pressed
+        factoryResetButtonPressed = true;
+        factoryResetButtonPressTime = millis();
+        Serial.println("Factory reset button pressed - hold for " + String(FACTORY_RESET_HOLD_TIME_MS / 1000) + " seconds");
+        
+    } else if (!buttonPressed && factoryResetButtonPressed) {
+        // Button released
+        factoryResetButtonPressed = false;
+        unsigned long holdTime = millis() - factoryResetButtonPressTime;
+        
+        if (holdTime >= FACTORY_RESET_HOLD_TIME_MS) {
+            Serial.println("Factory reset button held for " + String(holdTime / 1000) + " seconds - rebooting for factory reset!");
+            delay(100); // Brief delay for serial output
+            
+            // Reboot to trigger factory reset during boot
+            ESP.restart();
+        } else {
+            Serial.println("Factory reset button released after " + String(holdTime / 1000) + " seconds - no reset");
+        }
+    }
+}
+
+void performFactoryReset() {
+    Serial.println("========================================");
+    Serial.println("PERFORMING FACTORY RESET");
+    Serial.println("========================================");
+    
+    // Clear all preferences
+    Preferences preferences;
+    
+    // Clear configuration
+    preferences.begin("config", false);
+    preferences.clear();
+    preferences.end();
+    
+    // Clear pairing settings
+    preferences.begin("pairing", false);
+    preferences.clear();
+    preferences.end();
+    
+    // Clear channel names
+    preferences.begin("channel_names", false);
+    preferences.clear();
+    preferences.end();
+    
+    // Clear state logger
+    preferences.begin("state_log", false);
+    preferences.clear();
+    preferences.end();
+    
+    Serial.println("All settings cleared - rebooting...");
+    
+    // Blink LED to indicate factory reset
+    if (display.isAvailable()) {
+        display.clear();
+        display.setTextSize(2);
+        display.setCursor(10, 20);
+        display.println("FACTORY");
+        display.setCursor(25, 40);
+        display.println("RESET");
+        display.display();
+        delay(2000);
+    }
+    
+    // Blink status LED
+    for (int i = 0; i < 5; i++) {
+        digitalWrite(STATUS_LED_PIN, HIGH);
+        delay(200);
+        digitalWrite(STATUS_LED_PIN, LOW);
+        delay(200);
+    }
+    
+    delay(1000);
+    ESP.restart();
 }

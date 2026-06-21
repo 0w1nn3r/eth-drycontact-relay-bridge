@@ -3,7 +3,8 @@
 WebServer::WebServer(String& deviceID, OperationMode& currentMode, bool& ethernetConnected,
                      bool& jumperModeDetected, bool& isPaired, String& pairedDeviceID,
                      String& pairedDeviceIP, String& receiverIP, bool& useTCP,
-                     bool& discoveryEnabled, bool* dryContactState, bool* relayState)
+                     bool& discoveryEnabled, bool* dryContactState, bool* relayState,
+                     String& channel1Name, String& channel2Name)
     : server(WEB_PORT),
       display(nullptr),
       stateLogger(nullptr),
@@ -18,7 +19,9 @@ WebServer::WebServer(String& deviceID, OperationMode& currentMode, bool& etherne
       useTCP(useTCP),
       discoveryEnabled(discoveryEnabled),
       dryContactState(dryContactState),
-      relayState(relayState) {
+      relayState(relayState),
+      channel1Name(channel1Name),
+      channel2Name(channel2Name) {
 }
 
 void WebServer::begin() {
@@ -34,6 +37,7 @@ void WebServer::begin() {
     server.on("/scan_senders", HTTP_POST, std::bind(&WebServer::handleScanSenders, this));
     server.on("/pair_with_sender", HTTP_POST, std::bind(&WebServer::handlePairWithSender, this));
     server.on("/unpair_channel", HTTP_POST, std::bind(&WebServer::handleUnpairChannel, this));
+    server.on("/channel_names", HTTP_ANY, std::bind(&WebServer::handleChannelNames, this));
     
     server.begin();
     Serial.println("HTTP server started");
@@ -104,6 +108,21 @@ String WebServer::generateRootHTML() {
                 <br><br>
                 <button type="submit" class="button">Save Configuration</button>
             </form>
+            <br>
+            <div class="channel-naming">
+                <h3>Channel Names</h3>
+                <form id="channelNamesForm">
+                    <label for="channel1Name">Channel 1 Name:</label>
+                    <input type="text" id="channel1Name" name="channel1Name" maxlength="15" placeholder="Channel1" value=")" + channel1Name + R"(">
+                    <small>Single word, max 15 characters</small>
+                    <br><br>
+                    <label for="channel2Name">Channel 2 Name:</label>
+                    <input type="text" id="channel2Name" name="channel2Name" maxlength="15" placeholder="Channel2" value=")" + channel2Name + R"(">
+                    <small>Single word, max 15 characters</small>
+                    <br><br>
+                    <button type="button" class="button" onclick="saveChannelNames()">Save Channel Names</button>
+                </form>
+            </div>
             <br>
             <div class="pairing-controls">
                 <h3>Pairing Management</h3>
@@ -178,6 +197,50 @@ String WebServer::generateRootHTML() {
                 })
                 .catch(error => console.log('Error:', error));
             }
+        }
+        
+        function saveChannelNames() {
+            const channel1Name = document.getElementById('channel1Name').value.trim();
+            const channel2Name = document.getElementById('channel2Name').value.trim();
+            
+            // Validate names
+            if (!channel1Name || !channel2Name) {
+                alert('Please enter names for both channels');
+                return;
+            }
+            
+            if (channel1Name.indexOf(' ') >= 0 || channel2Name.indexOf(' ') >= 0) {
+                alert('Channel names must be single words (no spaces)');
+                return;
+            }
+            
+            if (channel1Name.length > 15 || channel2Name.length > 15) {
+                alert('Channel names must be 15 characters or less');
+                return;
+            }
+            
+            fetch('/channel_names', {
+                method: 'POST',
+                headers: {'Content-Type': 'application/json'},
+                body: JSON.stringify({
+                    channel1_name: channel1Name,
+                    channel2_name: channel2Name
+                })
+            })
+            .then(response => response.json())
+            .then(data => {
+                if (data.status === 'success') {
+                    console.log('Channel names saved:', data);
+                    alert('Channel names updated successfully!');
+                } else {
+                    console.error('Error saving channel names:', data);
+                    alert('Error: ' + data.message);
+                }
+            })
+            .catch(error => {
+                console.error('Error:', error);
+                alert('Error saving channel names');
+            });
         }
     </script>
 </body>
@@ -265,6 +328,12 @@ void WebServer::handleAPI() {
     doc["paired_device_id"] = pairedDeviceID;
     doc["paired_device_ip"] = pairedDeviceIP;
     doc["discovery_enabled"] = discoveryEnabled;
+    
+    // Add channel names
+    doc["channel_names"] = JsonArray();
+    JsonArray namesArray = doc["channel_names"].to<JsonArray>();
+    namesArray.add(channel1Name);
+    namesArray.add(channel2Name);
     
     String response;
     serializeJson(doc, response);
@@ -680,5 +749,85 @@ void WebServer::handleUnpairChannel() {
         server.send(200, "application/json", resp);
     } else {
         server.send(400, "text/plain", "Invalid JSON");
+    }
+}
+
+void WebServer::handleChannelNames() {
+    if (server.method() == HTTP_POST) {
+        String body = server.arg("plain");
+        JsonDocument request;
+        DeserializationError error = deserializeJson(request, body);
+        
+        if (!error) {
+            String newChannel1Name = request["channel1_name"] | "";
+            String newChannel2Name = request["channel2_name"] | "";
+            
+            // Validate channel names (one word, max length)
+            newChannel1Name.trim();
+            newChannel2Name.trim();
+            
+            bool valid1 = true, valid2 = true;
+            
+            if (newChannel1Name.length() > MAX_CHANNEL_NAME_LENGTH || 
+                newChannel1Name.indexOf(' ') >= 0 || 
+                newChannel1Name.length() == 0) {
+                valid1 = false;
+                newChannel1Name = channel1Name; // Keep current value
+            }
+            
+            if (newChannel2Name.length() > MAX_CHANNEL_NAME_LENGTH || 
+                newChannel2Name.indexOf(' ') >= 0 || 
+                newChannel2Name.length() == 0) {
+                valid2 = false;
+                newChannel2Name = channel2Name; // Keep current value
+            }
+            
+            if (valid1 && valid2) {
+                channel1Name = newChannel1Name;
+                channel2Name = newChannel2Name;
+                
+                // Update display
+                if (display) {
+                    display->setChannelNames(channel1Name, channel2Name);
+                }
+                
+                // Log the change
+                if (stateLogger) {
+                    stateLogger->logSystemEvent("Channel names updated: " + channel1Name + ", " + channel2Name);
+                }
+                
+                // Call save callback
+                if (saveChannelNamesCallback) {
+                    saveChannelNamesCallback();
+                }
+                
+                JsonDocument response;
+                response["status"] = "success";
+                response["message"] = "Channel names updated";
+                response["channel1_name"] = channel1Name;
+                response["channel2_name"] = channel2Name;
+                String resp;
+                serializeJson(response, resp);
+                server.send(200, "application/json", resp);
+            } else {
+                JsonDocument response;
+                response["status"] = "error";
+                response["message"] = "Invalid channel names. Use single words only, max " + String(MAX_CHANNEL_NAME_LENGTH) + " characters.";
+                String resp;
+                serializeJson(response, resp);
+                server.send(400, "application/json", resp);
+            }
+        } else {
+            server.send(400, "text/plain", "Invalid JSON");
+        }
+    } else {
+        // GET request - return current channel names
+        JsonDocument doc;
+        doc["channel1_name"] = channel1Name;
+        doc["channel2_name"] = channel2Name;
+        doc["max_length"] = MAX_CHANNEL_NAME_LENGTH;
+        String response;
+        serializeJson(doc, response);
+        server.send(200, "application/json", response);
     }
 }
