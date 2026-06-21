@@ -36,6 +36,7 @@ enum OperationMode {
 #define RELAY_PIN_2 4  // GPIO pin for relay output channel 2
 #define RELAY_ACTIVE_LOW true  // Set to true if relay is active low
 #define RELAY_PULSE_MS 500  // Pulse duration for momentary relay activation
+#define RELAY_LATCHING true  // true = relay follows the contact (stays energized until relay_off, e.g. UPS alarm); false = momentary RELAY_PULSE_MS pulse
 
 // State change logging configuration
 #define MAX_LOG_ENTRIES 100
