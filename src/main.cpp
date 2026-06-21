@@ -529,7 +529,32 @@ void processIncomingMessage(const String& message, const String& senderIP) {
     if (currentMode == MODE_RELAY_RECEIVER && channel >= 1 && channel <= 2) {
         int channelIndex = channel - 1;
         int relayPin = (channel == 1) ? RELAY_PIN_1 : RELAY_PIN_2;
-        
+
+        // Security: only act on commands from the paired sender for this channel.
+        // The /command endpoint is unauthenticated, so without this check any
+        // device on the LAN could POST and trip or silence the relay. Verify the
+        // source IP matches the paired sender (and the device ID, when supplied)
+        // before touching the relay.
+        if (!isPaired[channelIndex] || pairedDeviceIP[channelIndex].length() == 0) {
+            Serial.println("Rejected command for CH" + String(channel) +
+                           ": channel is not paired");
+            return;
+        }
+        if (senderIP != pairedDeviceIP[channelIndex]) {
+            Serial.println("Rejected command for CH" + String(channel) + " from " +
+                           senderIP + ": does not match paired sender IP " +
+                           pairedDeviceIP[channelIndex]);
+            return;
+        }
+        if (senderDeviceID.length() > 0 &&
+            pairedDeviceID[channelIndex].length() > 0 &&
+            senderDeviceID != pairedDeviceID[channelIndex]) {
+            Serial.println("Rejected command for CH" + String(channel) + " from device " +
+                           senderDeviceID + ": does not match paired device " +
+                           pairedDeviceID[channelIndex]);
+            return;
+        }
+
         if (command == "relay_on") {
             relayState[channelIndex] = true;
             relayPulseEndTime[channelIndex] = RELAY_LATCHING ? 0 : (millis() + RELAY_PULSE_MS);
