@@ -40,10 +40,10 @@ bool jumperModeDetected = false;
 // UDP for network discovery
 WiFiUDP udp;
 
-// Pairing state (dual channel)
-bool isPaired[2] = {false, false};
-String pairedDeviceID[2] = {"", ""};
-String pairedDeviceIP[2] = {"", ""};
+// Pairing state (device-to-device: one paired sender drives both channels)
+bool isPaired = false;
+String pairedDeviceID = "";
+String pairedDeviceIP = "";
 unsigned long lastDiscoveryBroadcast = 0;
 unsigned long lastDiscoveryScan = 0;
 bool discoveryEnabled = true;
@@ -63,7 +63,7 @@ bool factoryResetBootDetection = false;
 // Display and Web server objects
 Display display;
 WebServer webServer(deviceID, currentMode, ethernetConnected, jumperModeDetected,
-                   isPaired[0], pairedDeviceID[0], pairedDeviceIP[0], receiverIP,
+                   isPaired, pairedDeviceID, pairedDeviceIP, receiverIP,
                    discoveryEnabled, dryContactState, relayState, channel1Name, channel2Name);
 
 // Function prototypes
@@ -188,7 +188,7 @@ void loop() {
                 sendDiscoveryBroadcast();
                 lastDiscoveryBroadcast = millis();
             }
-        } else if (currentMode == MODE_RELAY_RECEIVER && !isPaired[0] && !isPaired[1]) {
+        } else if (currentMode == MODE_RELAY_RECEIVER && !isPaired) {
             // Receivers scan for senders every 5 seconds until paired
             if (millis() - lastDiscoveryScan > 5000) {
                 scanForSenders();
@@ -530,28 +530,29 @@ void processIncomingMessage(const String& message, const String& senderIP) {
         int channelIndex = channel - 1;
         int relayPin = (channel == 1) ? RELAY_PIN_1 : RELAY_PIN_2;
 
-        // Security: only act on commands from the paired sender for this channel.
+        // Security: only act on commands from the paired sender. Pairing is
+        // device-to-device, so the single paired sender drives both channels.
         // The /command endpoint is unauthenticated, so without this check any
         // device on the LAN could POST and trip or silence the relay. Verify the
         // source IP matches the paired sender (and the device ID, when supplied)
         // before touching the relay.
-        if (!isPaired[channelIndex] || pairedDeviceIP[channelIndex].length() == 0) {
+        if (!isPaired || pairedDeviceIP.length() == 0) {
             Serial.println("Rejected command for CH" + String(channel) +
-                           ": channel is not paired");
+                           ": device is not paired");
             return;
         }
-        if (senderIP != pairedDeviceIP[channelIndex]) {
+        if (senderIP != pairedDeviceIP) {
             Serial.println("Rejected command for CH" + String(channel) + " from " +
                            senderIP + ": does not match paired sender IP " +
-                           pairedDeviceIP[channelIndex]);
+                           pairedDeviceIP);
             return;
         }
         if (senderDeviceID.length() > 0 &&
-            pairedDeviceID[channelIndex].length() > 0 &&
-            senderDeviceID != pairedDeviceID[channelIndex]) {
+            pairedDeviceID.length() > 0 &&
+            senderDeviceID != pairedDeviceID) {
             Serial.println("Rejected command for CH" + String(channel) + " from device " +
                            senderDeviceID + ": does not match paired device " +
-                           pairedDeviceID[channelIndex]);
+                           pairedDeviceID);
             return;
         }
 
@@ -660,8 +661,8 @@ void handleDiscoveryPacket(const String& message) {
     String senderIP = doc["ip_address"] | "";
     
     // Only process sender discovery packets if we're an unpaired receiver
-    if (currentMode == MODE_RELAY_RECEIVER && !isPaired[0] && 
-        type == "discovery" && senderMode == MODE_DRY_CONTACT_SENDER && 
+    if (currentMode == MODE_RELAY_RECEIVER && !isPaired &&
+        type == "discovery" && senderMode == MODE_DRY_CONTACT_SENDER &&
         senderDeviceID.length() > 0 && senderIP.length() > 0) {
         
         Serial.println("Found sender: " + senderDeviceID + " at " + senderIP);
@@ -670,14 +671,14 @@ void handleDiscoveryPacket(const String& message) {
 }
 
 void pairWithDevice(const String& deviceID, const String& deviceIP) {
-    if (isPaired[0]) {
+    if (isPaired) {
         Serial.println("Already paired, ignoring new pairing request");
         return;
     }
-    
-    isPaired[0] = true;
-    pairedDeviceID[0] = deviceID;
-    pairedDeviceIP[0] = deviceIP;
+
+    isPaired = true;
+    pairedDeviceID = deviceID;
+    pairedDeviceIP = deviceIP;
     receiverIP = deviceIP; // Update the receiver IP for sending commands
     
     savePairingSettings();
@@ -693,46 +694,46 @@ void pairWithDevice(const String& deviceID, const String& deviceIP) {
     JsonDocument doc;
     doc["type"] = "pairing_confirmation";
     doc["device_id"] = deviceID;
-    doc["paired_with"] = pairedDeviceID[0];
-    doc["paired_ip"] = pairedDeviceIP[0];
+    doc["paired_with"] = pairedDeviceID;
+    doc["paired_ip"] = pairedDeviceIP;
     doc["timestamp"] = millis();
-    
+
     String message;
     serializeJson(doc, message);
-    
-    udp.beginPacket(pairedDeviceIP[0].c_str(), DEVICE_DISCOVERY_PORT);
+
+    udp.beginPacket(pairedDeviceIP.c_str(), DEVICE_DISCOVERY_PORT);
     udp.print(message);
     udp.endPacket();
-    
-    Serial.println("Sent pairing confirmation to " + pairedDeviceIP[0]);
+
+    Serial.println("Sent pairing confirmation to " + pairedDeviceIP);
 }
 
 void unpairDevice() {
-    if (!isPaired[0]) {
+    if (!isPaired) {
         Serial.println("No device paired to unpair");
         return;
     }
-    
-    Serial.println("Unpairing device: " + pairedDeviceID[0]);
-    
+
+    Serial.println("Unpairing device: " + pairedDeviceID);
+
     // Send unpairing notification
     JsonDocument doc;
     doc["type"] = "unpairing";
     doc["device_id"] = deviceID;
-    doc["unpairing_from"] = pairedDeviceID[0];
+    doc["unpairing_from"] = pairedDeviceID;
     doc["timestamp"] = millis();
-    
+
     String message;
     serializeJson(doc, message);
-    
-    udp.beginPacket(pairedDeviceIP[0].c_str(), DEVICE_DISCOVERY_PORT);
+
+    udp.beginPacket(pairedDeviceIP.c_str(), DEVICE_DISCOVERY_PORT);
     udp.print(message);
     udp.endPacket();
-    
+
     // Clear pairing state
-    isPaired[0] = false;
-    pairedDeviceID[0] = "";
-    pairedDeviceIP[0] = "";
+    isPaired = false;
+    pairedDeviceID = "";
+    pairedDeviceIP = "";
     receiverIP = "";
     
     savePairingSettings();
@@ -749,28 +750,28 @@ void loadPairingSettings() {
     Preferences preferences;
     preferences.begin("pairing", false);
     
-    isPaired[0] = preferences.getBool("is_paired_ch1", false);
-    isPaired[1] = preferences.getBool("is_paired_ch2", false);
-    pairedDeviceID[0] = preferences.getString("paired_device_id_ch1", "");
-    pairedDeviceID[1] = preferences.getString("paired_device_id_ch2", "");
-    pairedDeviceIP[0] = preferences.getString("paired_device_ip_ch1", "");
-    pairedDeviceIP[1] = preferences.getString("paired_device_ip_ch2", "");
-    
-    if (isPaired[0] && pairedDeviceID[0].length() > 0 && pairedDeviceIP[0].length() > 0) {
-        receiverIP = pairedDeviceIP[0]; // Update receiver IP for communication
+    isPaired = preferences.getBool("is_paired", false);
+    pairedDeviceID = preferences.getString("paired_device_id", "");
+    pairedDeviceIP = preferences.getString("paired_device_ip", "");
+
+    // Migrate from the older per-channel keys so a device paired on previous
+    // firmware keeps its pairing across the upgrade to device-to-device pairing.
+    if (!isPaired && preferences.getBool("is_paired_ch1", false)) {
+        isPaired = true;
+        pairedDeviceID = preferences.getString("paired_device_id_ch1", "");
+        pairedDeviceIP = preferences.getString("paired_device_ip_ch1", "");
+    }
+
+    if (isPaired && pairedDeviceID.length() > 0 && pairedDeviceIP.length() > 0) {
+        receiverIP = pairedDeviceIP; // Update receiver IP for communication
         Serial.println("Loaded pairing settings:");
-        Serial.println("  CH1 Paired with: " + pairedDeviceID[0]);
-        Serial.println("  CH1 Paired IP: " + pairedDeviceIP[0]);
-    }
-    if (isPaired[1] && pairedDeviceID[1].length() > 0 && pairedDeviceIP[1].length() > 0) {
-        Serial.println("  CH2 Paired with: " + pairedDeviceID[1]);
-        Serial.println("  CH2 Paired IP: " + pairedDeviceIP[1]);
-    }
-    
-    if (!isPaired[0] && !isPaired[1]) {
+        Serial.println("  Paired with: " + pairedDeviceID);
+        Serial.println("  Paired IP: " + pairedDeviceIP);
+    } else {
+        isPaired = false;
         Serial.println("No pairing settings found");
     }
-    
+
     preferences.end();
 }
 
@@ -778,12 +779,17 @@ void savePairingSettings() {
     Preferences preferences;
     preferences.begin("pairing", false);
     
-    preferences.putBool("is_paired_ch1", isPaired[0]);
-    preferences.putBool("is_paired_ch2", isPaired[1]);
-    preferences.putString("paired_device_id_ch1", pairedDeviceID[0]);
-    preferences.putString("paired_device_id_ch2", pairedDeviceID[1]);
-    preferences.putString("paired_device_ip_ch1", pairedDeviceIP[0]);
-    preferences.putString("paired_device_ip_ch2", pairedDeviceIP[1]);
+    preferences.putBool("is_paired", isPaired);
+    preferences.putString("paired_device_id", pairedDeviceID);
+    preferences.putString("paired_device_ip", pairedDeviceIP);
+
+    // Remove stale per-channel keys left by older firmware.
+    preferences.remove("is_paired_ch1");
+    preferences.remove("is_paired_ch2");
+    preferences.remove("paired_device_id_ch1");
+    preferences.remove("paired_device_id_ch2");
+    preferences.remove("paired_device_ip_ch1");
+    preferences.remove("paired_device_ip_ch2");
     
     preferences.end();
     

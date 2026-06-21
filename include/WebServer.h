@@ -48,9 +48,6 @@ private:
     void handleCommand();
     
     // Enhanced handler methods
-    void handleScanSenders();
-    void handlePairWithSender();
-    void handleUnpairChannel();
     void handleChannelNames();
     
     // Helper methods

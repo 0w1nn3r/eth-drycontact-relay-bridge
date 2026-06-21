@@ -32,9 +32,6 @@ void WebServer::begin() {
     server.on("/discovery", HTTP_GET, std::bind(&WebServer::handleDiscovery, this));
     server.on("/log", HTTP_GET, std::bind(&WebServer::handleLog, this));
     server.on("/pairing", HTTP_ANY, std::bind(&WebServer::handlePairing, this));
-    server.on("/scan_senders", HTTP_POST, std::bind(&WebServer::handleScanSenders, this));
-    server.on("/pair_with_sender", HTTP_POST, std::bind(&WebServer::handlePairWithSender, this));
-    server.on("/unpair_channel", HTTP_POST, std::bind(&WebServer::handleUnpairChannel, this));
     server.on("/command", HTTP_POST, std::bind(&WebServer::handleCommand, this));
     server.on("/channel_names", HTTP_ANY, std::bind(&WebServer::handleChannelNames, this));
     
@@ -552,102 +549,52 @@ void WebServer::handlePairing() {
         <a href="/" class="btn">Back to Main</a>
         
         <div class="channel">
-            <h3>Channel 1</h3>
-            <p>Current pairing: <span id="ch1-status">)=====" + (isPaired ? pairedDeviceID : "Not paired") + R"=====(</span></p>
-            <button class="btn" onclick="scanSenders(1) ">Scan for Senders</button>
-            )=====" + (isPaired ? "<button class=\"btn danger\" onclick=\"unpairChannel(1)\">Unpair</button>" : "") + R"=====(
-            <div id="ch1-senders" class="sender-list"></div>
+            <h3>Paired Sender</h3>
+            <p>Pairing is device-to-device: a single paired sender drives both relay channels.</p>
+            <p>Current pairing: <span id="pair-status">)=====" + (isPaired ? pairedDeviceID + " (" + pairedDeviceIP + ")" : "Not paired") + R"=====(</span></p>
+            )=====" + String(currentMode == MODE_RELAY_RECEIVER && !isPaired ? "<button class=\"btn\" onclick=\"scanForSenders()\">Scan for Senders</button>" : "") + R"=====(
+            )=====" + (isPaired ? "<button class=\"btn danger\" onclick=\"unpairDevice()\">Unpair Device</button>" : "") + R"=====(
         </div>
-        
-        <div class="channel">
-            <h3>Channel 2</h3>
-            <p>Current pairing: <span id="ch2-status">)=====" + (isPaired ? pairedDeviceID : "Not paired") + R"=====(</span></p>
-            <button class="btn" onclick="scanSenders(2) ">Scan for Senders</button>
-            <button class="btn danger" onclick="unpairChannel(2) ">Unpair</button>
-            <div id="ch2-senders" class="sender-list"></div>
-        </div>
-        
+
         <div id="status-message"></div>
     </div>
-    
+
     <script>
-        function scanSenders(channel) {
+        function scanForSenders() {
             const statusDiv = document.getElementById('status-message');
             statusDiv.innerHTML = '<div class="status scanning">Scanning for senders...</div>';
-            
-            fetch('/scan_senders', {
+
+            fetch('/api', {
                 method: 'POST',
                 headers: {'Content-Type': 'application/json'},
-                body: JSON.stringify({channel: channel})
+                body: JSON.stringify({action: 'scan_senders'})
             })
             .then(response => response.json())
             .then(data => {
-                if (data.status === 'success') {
-                    displaySenders(channel, data.senders || []);
-                    statusDiv.innerHTML = '<div class="status success">Scan completed</div>';
-                } else {
-                    statusDiv.innerHTML = '<div class="status error">Scan failed</div>';
-                }
+                statusDiv.innerHTML = '<div class="status success">Scan completed</div>';
+                setTimeout(() => location.reload(), 3000);
             })
             .catch(error => {
                 statusDiv.innerHTML = '<div class="status error">Error: ' + error.message + '</div>';
             });
         }
-        
-        function displaySenders(channel, senders) {
-            const sendersDiv = document.getElementById('ch' + channel + '-senders');
-            sendersDiv.innerHTML = '';
-            
-            senders.forEach(sender => {
-                const div = document.createElement('div');
-                div.className = 'sender-item';
-                div.innerHTML = '<strong>' + sender.device_id + '</strong><br>IP: ' + sender.ip_address + '<br>Mode: ' + sender.mode_text + '<br><button class="btn success" onclick="pairWithSender(' + channel + ', \'' + sender.device_id + '\', \'' + sender.ip_address + '\') ">Pair</button>';
-                sendersDiv.appendChild(div);
-            });
-        }
-        
-        function pairWithSender(channel, deviceId, ipAddress) {
-            const statusDiv = document.getElementById('status-message');
-            statusDiv.innerHTML = '<div class="status scanning">Pairing...</div>';
-            
-            fetch('/pair_with_sender', {
-                method: 'POST',
-                headers: {'Content-Type': 'application/json'},
-                body: JSON.stringify({
-                    channel: channel,
-                    device_id: deviceId,
-                    ip_address: ipAddress
-                })
-            })
-            .then(response => response.json())
-            .then(data => {
-                if (data.status === 'success') {
-                    statusDiv.innerHTML = '<div class="status success">Paired successfully</div>';
-                    document.getElementById('ch' + channel + '-status').textContent = deviceId;
-                } else {
-                    statusDiv.innerHTML = '<div class="status error">Pairing failed</div>';
-                }
-            })
-            .catch(error => {
-                statusDiv.innerHTML = '<div class="status error">Error: ' + error.message + '</div>';
-            });
-        }
-        
-        function unpairChannel(channel) {
-            if (confirm('Are you sure you want to unpair this channel?')) {
+
+        function unpairDevice() {
+            if (confirm('Are you sure you want to unpair this device?')) {
                 const statusDiv = document.getElementById('status-message');
                 statusDiv.innerHTML = '<div class="status scanning">Unpairing...</div>';
-                
-                fetch('/unpair_channel', {
+
+                fetch('/api', {
                     method: 'POST',
                     headers: {'Content-Type': 'application/json'},
-                    body: JSON.stringify({channel: channel})
+                    body: JSON.stringify({action: 'unpair_device'})
                 })
                 .then(response => response.json())
                 .then(data => {
                     if (data.status === 'success') {
                         statusDiv.innerHTML = '<div class="status success">Unpaired successfully</div>';
-                        document.getElementById('ch' + channel + '-status').textContent = 'Not paired';
+                        document.getElementById('pair-status').textContent = 'Not paired';
+                        setTimeout(() => location.reload(), 1000);
                     } else {
                         statusDiv.innerHTML = '<div class="status error">Unpairing failed</div>';
                     }
@@ -662,70 +609,6 @@ void WebServer::handlePairing() {
 </html>
 )=====";
     server.send(200, "text/html", html);
-}
-
-void WebServer::handleScanSenders() {
-    // This would scan for available senders and return them as JSON
-    JsonDocument response;
-    response["status"] = "success";
-    response["senders"] = JsonArray();
-    JsonArray senders = response["senders"].to<JsonArray>();
-    
-    // TODO: Implement actual sender discovery
-    // For now, return empty array
-    String resp;
-    serializeJson(response, resp);
-    server.send(200, "application/json", resp);
-}
-
-void WebServer::handlePairWithSender() {
-    String body = server.arg("plain");
-    JsonDocument request;
-    DeserializationError error = deserializeJson(request, body);
-    
-    if (!error) {
-        int channel = request["channel"] | 1;
-        String deviceId = request["device_id"] | "";
-        String ipAddress = request["ip_address"] | "";
-        
-        // TODO: Implement actual pairing logic
-        if (stateLogger) {
-            stateLogger->logPairingEvent("PAIR", deviceId, "Channel " + String(channel));
-        }
-        
-        JsonDocument response;
-        response["status"] = "success";
-        response["message"] = "Paired with " + deviceId;
-        String resp;
-        serializeJson(response, resp);
-        server.send(200, "application/json", resp);
-    } else {
-        server.send(400, "text/plain", "Invalid JSON");
-    }
-}
-
-void WebServer::handleUnpairChannel() {
-    String body = server.arg("plain");
-    JsonDocument request;
-    DeserializationError error = deserializeJson(request, body);
-    
-    if (!error) {
-        int channel = request["channel"] | 1;
-        
-        // TODO: Implement actual unpairing logic
-        if (stateLogger) {
-            stateLogger->logPairingEvent("UNPAIR", "Channel " + String(channel), "Unpaired");
-        }
-        
-        JsonDocument response;
-        response["status"] = "success";
-        response["message"] = "Channel " + String(channel) + " unpaired";
-        String resp;
-        serializeJson(response, resp);
-        server.send(200, "application/json", resp);
-    } else {
-        server.send(400, "text/plain", "Invalid JSON");
-    }
 }
 
 void WebServer::handleChannelNames() {
