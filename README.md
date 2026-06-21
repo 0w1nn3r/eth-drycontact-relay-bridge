@@ -94,7 +94,7 @@ A versatile Ethernet-based relay bridge using the Waveshare ESP32-P4-ETH board t
 - Controls GPIO2 and GPIO15 relay outputs (dual channel)
 - Supports momentary relay pulses (500ms default)
 - Configurable active-high/active-low relay logic
-- Independent channel control with separate pairing for each channel
+- Independent control of both relay channels from a single paired sender
 
 ### Network Configuration
 
@@ -195,10 +195,10 @@ The device includes a factory reset feature to clear all saved settings and rest
 
 The device features a comprehensive web interface with advanced capabilities:
 
-#### Multi-Sender Pairing
-- **Channel-Specific Pairing**: Each channel can be paired with different senders independently
+#### Device-to-Device Pairing
+- **Single Paired Sender**: A receiver pairs with one sender, which drives both relay channels
 - **Sender Discovery**: Scan the network for available sender devices
-- **Visual Pairing Management**: Intuitive interface for pairing and unpairing channels
+- **Visual Pairing Management**: Intuitive interface for pairing and unpairing the device
 - **Real-time Status**: Live updates of pairing status and connection state
 
 #### State Change Logging

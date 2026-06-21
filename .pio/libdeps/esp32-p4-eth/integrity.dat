@@ -1,0 +1,9 @@
+Adafruit GFX Library
+Adafruit SSD1306
+ESP32WebServer
+HTTPClient
+ETH
+NTPClient
+ArduinoJson
+ESPmDNS
+Adafruit BusIO
