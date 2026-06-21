@@ -102,7 +102,7 @@ A versatile Ethernet-based relay bridge using the Waveshare ESP32-P4-ETH board t
 - **Protocol**: Choose between UDP (fast, lightweight) or TCP (reliable)
 - **Ports**: UDP 8888, TCP 8889 (configurable)
 - **Discovery**: UDP broadcast on port 8900 for device discovery
-- **Heartbeat**: Each device broadcasts a status heartbeat every 30 seconds on port 8900
+- **Heartbeat**: Each device sends a status heartbeat every 30 seconds on port 8900 — unicast to its known peer once paired (routable across subnets), or broadcast until a peer is known
 - **Peer Liveness**: A paired device tracks its peer's heartbeats and reports it offline after 90 seconds (3 missed beats) on the web UI and OLED
 
 #### DHCP Information
@@ -268,7 +268,7 @@ The device features a comprehensive web interface with advanced capabilities:
 ```
 
 #### Heartbeat Message
-Broadcast on port 8900 every 30 seconds. The paired peer uses it to track liveness.
+Sent on port 8900 every 30 seconds (unicast to the peer once paired, broadcast otherwise). The paired peer uses it to track liveness.
 ```json
 {
   "type": "heartbeat",
