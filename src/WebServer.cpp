@@ -28,7 +28,6 @@ void WebServer::begin() {
     server.on("/", HTTP_GET, std::bind(&WebServer::handleRoot, this));
     server.on("/api", HTTP_ANY, std::bind(&WebServer::handleAPI, this));
     server.on("/config", HTTP_ANY, std::bind(&WebServer::handleConfig, this));
-    server.on("/mode", HTTP_ANY, std::bind(&WebServer::handleMode, this));
     server.on("/status", HTTP_GET, std::bind(&WebServer::handleStatus, this));
     server.on("/discovery", HTTP_GET, std::bind(&WebServer::handleDiscovery, this));
     server.on("/log", HTTP_GET, std::bind(&WebServer::handleLog, this));
@@ -36,6 +35,7 @@ void WebServer::begin() {
     server.on("/scan_senders", HTTP_POST, std::bind(&WebServer::handleScanSenders, this));
     server.on("/pair_with_sender", HTTP_POST, std::bind(&WebServer::handlePairWithSender, this));
     server.on("/unpair_channel", HTTP_POST, std::bind(&WebServer::handleUnpairChannel, this));
+    server.on("/command", HTTP_POST, std::bind(&WebServer::handleCommand, this));
     server.on("/channel_names", HTTP_ANY, std::bind(&WebServer::handleChannelNames, this));
     
     server.begin();
@@ -89,19 +89,13 @@ String WebServer::generateRootHTML() {
         
         <div class="form-group">
             <h3>Configuration</h3>
-            <form method="POST" action="/mode">
-                <label for="operationMode">Operation Mode:</label>
-                <select name="mode" id="operationMode">
-                    <option value="0">Not Configured</option>
-                    <option value="1">Dry Contact Sender</option>
-                    <option value="2">Relay Receiver</option>
-                </select>
-                <br><br>
-                <label for="receiverIP">Receiver IP (for Sender mode):</label>
-                <input type="text" id="receiverIP" name="receiverIP" placeholder="192.168.1.100" value=")=====" + receiverIP + R"=====(">
-                <br><br>
-                <button type="submit" class="button">Save Configuration</button>
-            </form>
+            <p><strong>Mode:</strong> <span id="mode-display">)=====" + String(currentMode == MODE_DRY_CONTACT_SENDER ? "Dry Contact Sender" : currentMode == MODE_RELAY_RECEIVER ? "Relay Receiver" : "Not Configured") + R"=====(</span> (Set by jumper)</p>
+            <br>
+            <label for="receiverIP">Receiver IP (for Sender mode):</label>
+            <input type="text" id="receiverIP" name="receiverIP" placeholder="192.168.1.100" value=")=====" + receiverIP + R"=====(">
+            <br><br>
+            <button type="button" class="button" onclick="saveReceiverIP()">Save Configuration</button>
+        </div>
             <br>
             <div class="channel-naming">
                 <h3>Channel Names</h3>
@@ -147,6 +141,30 @@ String WebServer::generateRootHTML() {
                 })
                 .catch(error => console.log('Error:', error));
         }, 2000);
+        
+        function saveReceiverIP() {
+            const receiverIP = document.getElementById('receiverIP').value.trim();
+            
+            if (!receiverIP) {
+                alert('Please enter a receiver IP address');
+                return;
+            }
+            
+            fetch('/config', {
+                method: 'POST',
+                headers: {'Content-Type': 'application/x-www-form-urlencoded'},
+                body: 'receiverIP=' + encodeURIComponent(receiverIP)
+            })
+            .then(response => response.text())
+            .then(data => {
+                console.log('Configuration saved:', data);
+                alert('Configuration saved successfully!');
+            })
+            .catch(error => {
+                console.error('Error:', error);
+                alert('Error saving configuration');
+            });
+        }
         
         function toggleDiscovery() {
             fetch('/api', {
@@ -341,33 +359,6 @@ void WebServer::handleConfig() {
     } else {
         JsonDocument doc;
         doc["receiver_ip"] = receiverIP;
-        String response;
-        serializeJson(doc, response);
-        server.send(200, "application/json", response);
-    }
-}
-
-void WebServer::handleMode() {
-    if (server.method() == HTTP_POST) {
-        if (server.hasArg("mode")) {
-            int newMode = server.arg("mode").toInt();
-            if (newMode >= MODE_UNDEFINED && newMode <= MODE_RELAY_RECEIVER) {
-                currentMode = (OperationMode)newMode;
-                server.send(200, "text/plain", "Mode updated");
-            } else {
-                server.send(400, "text/plain", "Invalid mode");
-            }
-        } else {
-            server.send(400, "text/plain", "Missing mode parameter");
-        }
-    } else {
-        JsonDocument doc;
-        doc["current_mode"] = currentMode;
-        doc["modes"] = JsonArray();
-        JsonArray modes = doc["modes"].to<JsonArray>();
-        modes.add("Not Configured");
-        modes.add("Dry Contact Sender");
-        modes.add("Relay Receiver");
         String response;
         serializeJson(doc, response);
         server.send(200, "application/json", response);
@@ -814,5 +805,22 @@ void WebServer::handleChannelNames() {
         String response;
         serializeJson(doc, response);
         server.send(200, "application/json", response);
+    }
+}
+
+void WebServer::handleCommand() {
+    if (server.method() == HTTP_POST) {
+        String body = server.arg("plain");
+        String clientIP = server.client().remoteIP().toString();
+        
+        Serial.println("Received command from " + clientIP + ": " + body);
+        
+        // Process the command using the main processIncomingMessage function
+        extern void processIncomingMessage(const String& message, const String& senderIP);
+        processIncomingMessage(body, clientIP);
+        
+        server.send(200, "application/json", "{\"status\":\"ok\"}");
+    } else {
+        server.send(405, "text/plain", "Method not allowed");
     }
 }

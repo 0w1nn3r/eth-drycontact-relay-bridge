@@ -64,7 +64,7 @@ enum OperationMode {
 // Communication protocol
 #define PROTOCOL_VERSION 1
 #define UDP_PORT 8888
-#define TCP_PORT 8889
+#define TCP_PORT 80
 #define HEARTBEAT_INTERVAL_MS 30000
 #define DEVICE_DISCOVERY_PORT 8900
 

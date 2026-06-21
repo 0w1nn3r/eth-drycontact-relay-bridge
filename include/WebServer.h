@@ -41,11 +41,11 @@ private:
     void handleRoot();
     void handleAPI();
     void handleConfig();
-    void handleMode();
     void handleStatus();
     void handleDiscovery();
     void handleLog();
     void handlePairing();
+    void handleCommand();
     
     // Enhanced handler methods
     void handleScanSenders();

@@ -635,7 +635,7 @@ void handleDiscoveryPacket() {
     String senderIP = doc["ip_address"] | "";
     
     // Only process sender discovery packets if we're an unpaired receiver
-    if (currentMode == MODE_RELAY_RECEIVER && !isPaired && 
+    if (currentMode == MODE_RELAY_RECEIVER && !isPaired[0] && 
         type == "discovery" && senderMode == MODE_DRY_CONTACT_SENDER && 
         senderDeviceID.length() > 0 && senderIP.length() > 0) {
         
