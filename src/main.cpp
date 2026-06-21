@@ -13,6 +13,8 @@
 #include "WebServer.h"
 #include "StateLogger.h"
 #include "TimeManager.h"
+#include "UpsState.h"
+#include "SnmpClient.h"
 
 // Global variables
 OperationMode currentMode = MODE_UNDEFINED;
@@ -51,6 +53,11 @@ bool discoveryEnabled = true;
 unsigned long lastPeerHeartbeat = 0;
 bool peerOnline = false;
 
+// UPS (SNMP) polling state for sender mode
+UpsState ups;
+unsigned long lastUpsPoll = 0;
+int upsFailCount = 0;
+
 // State logger
 StateLogger stateLogger;
 
@@ -67,7 +74,7 @@ bool factoryResetBootDetection = false;
 Display display;
 WebServer webServer(deviceID, currentMode, ethernetConnected, jumperModeDetected,
                    isPaired, pairedDeviceID, pairedDeviceIP, receiverIP,
-                   discoveryEnabled, peerOnline, dryContactState, relayState,
+                   discoveryEnabled, peerOnline, ups, dryContactState, relayState,
                    channel1Name, channel2Name);
 
 // Function prototypes
@@ -95,6 +102,10 @@ void loadPairingSettings();
 void savePairingSettings();
 void loadChannelNames();
 void saveChannelNames();
+void loadUpsConfig();
+void saveUpsConfig();
+void pollUps();
+bool channelInputActive(int channel);
 void checkFactoryReset();
 void performFactoryReset();
 void handleFactoryResetButton();
@@ -111,7 +122,8 @@ void setup() {
     generateDeviceID();
     loadPairingSettings();
     loadChannelNames();
-    
+    loadUpsConfig();
+
     // Initialize state logger
     stateLogger.begin();
     
@@ -137,6 +149,7 @@ void setup() {
     webServer.setStateLogger(&stateLogger);
     stateLogger.setTimeManager(&timeManager);
     webServer.setChannelNameSaveCallback([]() { saveChannelNames(); });
+    webServer.setUpsConfigSaveCallback([]() { saveUpsConfig(); });
     webServer.begin();
     
     // Initialize mode-specific functionality
@@ -167,6 +180,14 @@ void loop() {
         display.update();
     }
     
+    // Poll the UPS over SNMP on its configured interval (sender mode only)
+    if (currentMode == MODE_DRY_CONTACT_SENDER && ethernetConnected &&
+        ups.ip.length() > 0 && ups.usesUps() &&
+        millis() - lastUpsPoll > (unsigned long)ups.pollIntervalSec * 1000) {
+        pollUps();
+        lastUpsPoll = millis();
+    }
+
     // Handle mode-specific operations
     switch (currentMode) {
         case MODE_DRY_CONTACT_SENDER:
@@ -374,10 +395,57 @@ void saveConfiguration() {
 
 void setupDryContactSender() {
     Serial.println("Configuring as Dry Contact Sender");
-    dryContactState[0] = (digitalRead(DRY_CONTACT_PIN_1) == LOW);
-    dryContactState[1] = (digitalRead(DRY_CONTACT_PIN_2) == LOW);
+    // Seed each channel from its configured source so the first real change
+    // (a closing contact or the first UPS poll) is detected and sent.
+    dryContactState[0] = channelInputActive(0);
+    dryContactState[1] = channelInputActive(1);
     dryContactChangeTime[0] = millis();
     dryContactChangeTime[1] = millis();
+}
+
+// Current active state for a channel, resolved from its configured source.
+bool channelInputActive(int channel) {
+    if (channel < 0 || channel > 1) return false;
+    switch (ups.channelSource[channel]) {
+        case SRC_GPIO: {
+            int pin = (channel == 0) ? DRY_CONTACT_PIN_1 : DRY_CONTACT_PIN_2;
+            return digitalRead(pin) == LOW;
+        }
+        case SRC_UPS_ON_BATTERY:  return ups.onBattery;
+        case SRC_UPS_BATTERY_LOW: return ups.batteryLow;
+        case SRC_DISABLED:
+        default:                  return false;
+    }
+}
+
+// Poll the UPS over SNMP and update onBattery/batteryLow. On repeated failures
+// the device fails to alarm: it asserts both states so any UPS-mapped channel
+// trips, rather than silently masking a real outage.
+void pollUps() {
+    int outputSource = 0, batteryStatus = 0;
+    if (snmpGetUpsState(ups.ip, ups.port, ups.community,
+                        outputSource, batteryStatus, SNMP_TIMEOUT_MS)) {
+        ups.onBattery = (outputSource == 5);                    // battery(5)
+        ups.batteryLow = (batteryStatus == 3 || batteryStatus == 4); // low(3)/depleted(4)
+        ups.reachable = true;
+        upsFailCount = 0;
+        Serial.println("UPS poll OK: outputSource=" + String(outputSource) +
+                       " batteryStatus=" + String(batteryStatus) +
+                       " (onBattery=" + String(ups.onBattery) +
+                       ", batteryLow=" + String(ups.batteryLow) + ")");
+    } else {
+        upsFailCount++;
+        Serial.println("UPS poll FAILED (" + String(upsFailCount) + " consecutive)");
+        if (upsFailCount >= UPS_FAIL_ALARM_COUNT) {
+            if (ups.reachable) {
+                stateLogger.logSystemEvent("UPS unreachable - failing to alarm");
+            }
+            ups.reachable = false;
+            ups.onBattery = true;   // fail to alarm
+            ups.batteryLow = true;
+        }
+        // Below the threshold: hold the last known states to ride out blips.
+    }
 }
 
 void setupRelayReceiver() {
@@ -409,11 +477,13 @@ void detectModeFromJumper() {
 }
 
 void handleDryContact() {
-    // Handle both channels
+    // Handle both channels, each resolved from its configured input source.
     for (int channel = 0; channel < 2; channel++) {
-        int pin = (channel == 0) ? DRY_CONTACT_PIN_1 : DRY_CONTACT_PIN_2;
-        bool currentState = (digitalRead(pin) == LOW);
-        
+        if (ups.channelSource[channel] == SRC_DISABLED) {
+            continue;
+        }
+        bool currentState = channelInputActive(channel);
+
         if (currentState != dryContactState[channel]) {
             // Debounce
             if (millis() - dryContactChangeTime[channel] > DRY_CONTACT_DEBOUNCE_MS) {
@@ -907,6 +977,48 @@ void saveChannelNames() {
     }
 }
 
+void loadUpsConfig() {
+    Preferences preferences;
+    preferences.begin("ups", false);
+
+    ups.ip = preferences.getString("ip", "");
+    ups.community = preferences.getString("community", "public");
+    ups.port = preferences.getUShort("port", SNMP_DEFAULT_PORT);
+    ups.pollIntervalSec = preferences.getUShort("interval", UPS_DEFAULT_POLL_INTERVAL_S);
+    ups.channelSource[0] = preferences.getInt("src0", SRC_GPIO);
+    ups.channelSource[1] = preferences.getInt("src1", SRC_GPIO);
+
+    if (ups.pollIntervalSec < 1) ups.pollIntervalSec = 1;
+    if (ups.port == 0) ups.port = SNMP_DEFAULT_PORT;
+
+    preferences.end();
+    Serial.println("UPS config loaded: ip='" + ups.ip + "' interval=" +
+                   String(ups.pollIntervalSec) + "s src=[" +
+                   String(ups.channelSource[0]) + "," + String(ups.channelSource[1]) + "]");
+}
+
+void saveUpsConfig() {
+    Preferences preferences;
+    preferences.begin("ups", false);
+
+    preferences.putString("ip", ups.ip);
+    preferences.putString("community", ups.community);
+    preferences.putUShort("port", ups.port);
+    preferences.putUShort("interval", ups.pollIntervalSec);
+    preferences.putInt("src0", ups.channelSource[0]);
+    preferences.putInt("src1", ups.channelSource[1]);
+
+    preferences.end();
+
+    // Re-seed change detection so a source change takes effect cleanly and a
+    // fresh poll happens promptly.
+    dryContactState[0] = channelInputActive(0);
+    dryContactState[1] = channelInputActive(1);
+    upsFailCount = 0;
+    lastUpsPoll = 0;
+    Serial.println("UPS config saved: ip='" + ups.ip + "'");
+}
+
 void checkFactoryReset() {
     Serial.println("Checking for factory reset button during boot...");
     
@@ -988,7 +1100,12 @@ void performFactoryReset() {
     preferences.begin("state_log", false);
     preferences.clear();
     preferences.end();
-    
+
+    // Clear UPS config
+    preferences.begin("ups", false);
+    preferences.clear();
+    preferences.end();
+
     Serial.println("All settings cleared - rebooting...");
     
     // Blink LED to indicate factory reset

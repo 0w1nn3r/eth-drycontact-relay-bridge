@@ -8,6 +8,8 @@ A versatile Ethernet-based relay bridge using the Waveshare ESP32-P4-ETH board t
   - **Dry Contact Sender**: Monitors dry contact inputs and transmits state changes over Ethernet
   - **Relay Receiver**: Receives commands over Ethernet and controls relay outputs
 
+- **UPS (SNMP) Input**: The sender can poll a network UPS over SNMP and map its "on battery" / "battery low" states to channels instead of the GPIO inputs
+
 - **Hardware Interface**:
   - **OLED Display**: 128x64 SSD1306 display showing device status, IP addresses, and I/O states
   - **Mode Selection Jumper**: Hardware jumper on GPIO10 for mode selection (overrides software settings)
@@ -88,6 +90,22 @@ A versatile Ethernet-based relay bridge using the Waveshare ESP32-P4-ETH board t
 - Supports both momentary and sustained contact detection
 - Configurable debounce timing (50ms default)
 - Independent channel operation with separate logging
+- Optionally polls a network UPS over SNMP and maps its state to channels instead of GPIO (see below)
+
+#### UPS (SNMP) Input
+Instead of (or alongside) the GPIO inputs, the sender can poll a network UPS and drive the channels from the UPS's status. Configured on the web interface (sender mode):
+
+- **UPS IP / SNMP community / port**: connection to the UPS network card (SNMP v1/v2c read).
+- **Poll interval**: how often to query the UPS (seconds).
+- **Per-channel source**: each channel is independently set to `GPIO input` (default), `UPS: On battery`, `UPS: Battery low`, or `Disabled`.
+
+State mapping uses the standard RFC 1628 UPS-MIB:
+- **On battery** ← `upsOutputSource` (`1.3.6.1.2.1.33.1.4.1.0`) = `battery(5)`
+- **Battery low** ← `upsBatteryStatus` (`1.3.6.1.2.1.33.1.2.1.0`) = `batteryLow(3)`/`batteryDepleted(4)`
+
+When a mapped state becomes active the channel is sent to the receiver exactly like a closing contact. **Fail-safe:** after 3 consecutive failed polls the UPS is treated as on-battery (and battery-low), so UPS-mapped channels alarm rather than masking a real outage; transient blips below that threshold hold the last known state. UPS reachability and state are shown on the web UI.
+
+> Note: the UPS card must have SNMP v1/v2c read enabled and support the standard UPS-MIB. Some vendors expose these values only under proprietary MIBs/OIDs.
 
 #### Relay Receiver Mode
 - Listens for commands over UDP/TCP
@@ -254,6 +272,7 @@ The device features a comprehensive web interface with advanced capabilities:
 - `GET/POST /mode` - Operation mode management
 - `GET /status` - Basic device status
 - `GET /discovery` - Device discovery information
+- `GET/POST /ups_config` - UPS (SNMP) polling configuration and status (sender mode)
 
 ### Communication Protocol
 
