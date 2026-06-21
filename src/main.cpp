@@ -83,7 +83,7 @@ void setupRelayReceiver();
 void detectModeFromJumper();
 void sendDiscoveryBroadcast();
 void scanForSenders();
-void handleDiscoveryPacket();
+void handleDiscoveryPacket(const String& message);
 void pairWithDevice(const String& deviceID, const String& deviceIP);
 void unpairDevice();
 void loadPairingSettings();
@@ -438,7 +438,7 @@ void handleDryContact() {
 void handleRelay() {
     // Handle relay pulse timing for both channels
     for (int channel = 0; channel < 2; channel++) {
-        if (relayState[channel] && millis() > relayPulseEndTime[channel]) {
+        if (relayState[channel] && relayPulseEndTime[channel] != 0 && millis() > relayPulseEndTime[channel]) {
             relayState[channel] = false;
             int pin = (channel == 0) ? RELAY_PIN_1 : RELAY_PIN_2;
             
@@ -479,7 +479,7 @@ void sendRelayCommand(const String& targetIP, int channel, bool activate) {
     
     // Send via TCP
     HTTPClient http;
-    http.begin("http://" + targetIP + ":" + String(TCP_PORT) + "/command");
+    http.begin("http://" + targetIP + ":" + String(WEB_PORT) + "/command");
     http.addHeader("Content-Type", "application/json");
     int httpResponseCode = http.POST(message);
     
@@ -532,7 +532,7 @@ void processIncomingMessage(const String& message, const String& senderIP) {
         
         if (command == "relay_on") {
             relayState[channelIndex] = true;
-            relayPulseEndTime[channelIndex] = millis() + RELAY_PULSE_MS;
+            relayPulseEndTime[channelIndex] = RELAY_LATCHING ? 0 : (millis() + RELAY_PULSE_MS);
             if (RELAY_ACTIVE_LOW) {
                 digitalWrite(relayPin, LOW);  // Relay on
             } else {
@@ -612,7 +612,7 @@ void scanForSenders() {
             String message = String(packetBuffer);
             Serial.println("Received discovery packet: " + message);
             
-            handleDiscoveryPacket();
+            handleDiscoveryPacket(message);
         }
         delay(10);
     }
@@ -620,9 +620,9 @@ void scanForSenders() {
     udp.stop();
 }
 
-void handleDiscoveryPacket() {
+void handleDiscoveryPacket(const String& message) {
     JsonDocument doc;
-    DeserializationError error = deserializeJson(doc, udp);
+    DeserializationError error = deserializeJson(doc, message);
     
     if (error) {
         Serial.println("Error parsing discovery packet: " + String(error.c_str()));
