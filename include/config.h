@@ -30,15 +30,23 @@ enum OperationMode {
 // Mode selection jumper
 #define MODE_JUMPER_PIN 16  // GPIO pin for mode selection jumper (LOW = Sender, HIGH = Receiver)
 
-// Dry contact sender configuration
-#define DRY_CONTACT_PIN 4  // GPIO pin for dry contact input
+// Dry contact sender configuration (dual channel)
+#define DRY_CONTACT_PIN_1 4   // GPIO pin for dry contact input channel 1
+#define DRY_CONTACT_PIN_2 12  // GPIO pin for dry contact input channel 2
 #define DRY_CONTACT_DEBOUNCE_MS 50
 #define DRY_CONTACT_LONG_PRESS_MS 1000
 
-// Relay receiver configuration
-#define RELAY_PIN 2  // GPIO pin for relay output
+// Relay receiver configuration (dual channel)
+#define RELAY_PIN_1 2   // GPIO pin for relay output channel 1
+#define RELAY_PIN_2 15  // GPIO pin for relay output channel 2
 #define RELAY_ACTIVE_LOW true  // Set to true if relay is active low
 #define RELAY_PULSE_MS 500  // Pulse duration for momentary relay activation
+
+// State change logging configuration
+#define MAX_LOG_ENTRIES 100
+#define LOG_ENTRY_SIZE 128
+#define LOG_FLASH_SECTOR 0  // Flash sector for log storage
+#define LOG_SAVE_INTERVAL_MS 30000  // Save log to flash every 30 seconds
 
 // OLED Display configuration (128x64 SSD1306)
 #define OLED_WIDTH 128

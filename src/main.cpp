@@ -11,6 +11,7 @@
 #include "config.h"
 #include "Display.h"
 #include "WebServer.h"
+#include "StateLogger.h"
 
 // Global variables
 OperationMode currentMode = MODE_UNDEFINED;
@@ -19,11 +20,11 @@ unsigned long lastHeartbeat = 0;
 unsigned long lastLedBlink = 0;
 bool ledState = false;
 
-// Mode-specific variables
-bool dryContactState = false;
-unsigned long dryContactChangeTime = 0;
-bool relayState = false;
-unsigned long relayPulseEndTime = 0;
+// Mode-specific variables (dual channel)
+bool dryContactState[2] = {false, false};
+unsigned long dryContactChangeTime[2] = {0, 0};
+bool relayState[2] = {false, false};
+unsigned long relayPulseEndTime[2] = {0, 0};
 
 // Network configuration
 String deviceID = "";
@@ -36,18 +37,21 @@ bool jumperModeDetected = false;
 // UDP for network discovery
 WiFiUDP udp;
 
-// Pairing state
-bool isPaired = false;
-String pairedDeviceID = "";
-String pairedDeviceIP = "";
+// Pairing state (dual channel)
+bool isPaired[2] = {false, false};
+String pairedDeviceID[2] = {"", ""};
+String pairedDeviceIP[2] = {"", ""};
 unsigned long lastDiscoveryBroadcast = 0;
 unsigned long lastDiscoveryScan = 0;
 bool discoveryEnabled = true;
 
+// State logger
+StateLogger stateLogger;
+
 // Display and Web server objects
 Display display;
 WebServer webServer(deviceID, currentMode, ethernetConnected, jumperModeDetected,
-                   isPaired, pairedDeviceID, pairedDeviceIP, receiverIP, useTCP,
+                   isPaired[0], pairedDeviceID[0], pairedDeviceIP[0], receiverIP, useTCP,
                    discoveryEnabled, dryContactState, relayState);
 
 // Function prototypes
@@ -84,6 +88,9 @@ void setup() {
     generateDeviceID();
     loadPairingSettings();
     
+    // Initialize state logger
+    stateLogger.begin();
+    
     // Initialize display
     if (display.init()) {
         display.setDeviceID(deviceID);
@@ -99,6 +106,7 @@ void setup() {
     
     // Setup web server
     webServer.setDisplay(&display);
+    webServer.setStateLogger(&stateLogger);
     webServer.begin();
     
     // Initialize mode-specific functionality
@@ -155,7 +163,7 @@ void loop() {
                 sendDiscoveryBroadcast();
                 lastDiscoveryBroadcast = millis();
             }
-        } else if (currentMode == MODE_RELAY_RECEIVER && !isPaired) {
+        } else if (currentMode == MODE_RELAY_RECEIVER && !isPaired[0] && !isPaired[1]) {
             // Receivers scan for senders every 5 seconds until paired
             if (millis() - lastDiscoveryScan > 5000) {
                 scanForSenders();
@@ -163,6 +171,9 @@ void loop() {
             }
         }
     }
+    
+    // Update state logger
+    stateLogger.update();
     
     delay(10);
 }
@@ -177,15 +188,19 @@ void setupHardware() {
     // Initialize mode jumper pin
     pinMode(MODE_JUMPER_PIN, INPUT_PULLUP);
     
-    // Initialize mode-specific pins
-    pinMode(DRY_CONTACT_PIN, INPUT_PULLUP);
-    pinMode(RELAY_PIN, OUTPUT);
+    // Initialize mode-specific pins (dual channel)
+    pinMode(DRY_CONTACT_PIN_1, INPUT_PULLUP);
+    pinMode(DRY_CONTACT_PIN_2, INPUT_PULLUP);
+    pinMode(RELAY_PIN_1, OUTPUT);
+    pinMode(RELAY_PIN_2, OUTPUT);
     
-    // Set relay initial state
+    // Set relay initial states
     if (RELAY_ACTIVE_LOW) {
-        digitalWrite(RELAY_PIN, HIGH);  // Relay off (active low)
+        digitalWrite(RELAY_PIN_1, HIGH);  // Relay off (active low)
+        digitalWrite(RELAY_PIN_2, HIGH);  // Relay off (active low)
     } else {
-        digitalWrite(RELAY_PIN, LOW);   // Relay off (active high)
+        digitalWrite(RELAY_PIN_1, LOW);   // Relay off (active high)
+        digitalWrite(RELAY_PIN_2, LOW);   // Relay off (active high)
     }
     
     // Initialize EEPROM
@@ -352,45 +367,68 @@ void detectModeFromJumper() {
 }
 
 void handleDryContact() {
-    bool currentState = (digitalRead(DRY_CONTACT_PIN) == LOW);
-    
-    if (currentState != dryContactState) {
-        // Debounce
-        if (millis() - dryContactChangeTime > DRY_CONTACT_DEBOUNCE_MS) {
-            dryContactState = currentState;
-            dryContactChangeTime = millis();
-            
-            Serial.println("Dry contact state changed: " + String(dryContactState ? "CLOSED" : "OPEN"));
-            
-            // Update display
-            if (display.isAvailable()) {
-                display.setInputState(dryContactState);
-            }
-            
-            // Send state change to receiver
-            if (receiverIP.length() > 0) {
-                sendRelayCommand(receiverIP, dryContactState);
-            } else {
-                Serial.println("WARNING: No receiver IP configured");
+    // Handle both channels
+    for (int channel = 0; channel < 2; channel++) {
+        int pin = (channel == 0) ? DRY_CONTACT_PIN_1 : DRY_CONTACT_PIN_2;
+        bool currentState = (digitalRead(pin) == LOW);
+        
+        if (currentState != dryContactState[channel]) {
+            // Debounce
+            if (millis() - dryContactChangeTime[channel] > DRY_CONTACT_DEBOUNCE_MS) {
+                bool oldState = dryContactState[channel];
+                dryContactState[channel] = currentState;
+                dryContactChangeTime[channel] = millis();
+                
+                Serial.println("Dry contact CH" + String(channel + 1) + " state changed: " + 
+                              String(currentState ? "CLOSED" : "OPEN"));
+                
+                // Log state change
+                stateLogger.logStateChange(channel + 1, "DRY_CONTACT", 
+                                          String(oldState ? "CLOSED" : "OPEN"), 
+                                          String(currentState ? "CLOSED" : "OPEN"));
+                
+                // Update display
+                if (display.isAvailable()) {
+                    display.setInputState(channel + 1, currentState);
+                }
+                
+                // Send state change to receiver
+                if (receiverIP.length() > 0) {
+                    sendRelayCommand(receiverIP, channel + 1, currentState);
+                } else {
+                    Serial.println("WARNING: No receiver IP configured for CH" + String(channel + 1));
+                }
             }
         }
     }
 }
 
 void handleRelay() {
-    // Handle relay pulse timing
-    if (relayState && millis() > relayPulseEndTime) {
-        relayState = false;
-        if (RELAY_ACTIVE_LOW) {
-            digitalWrite(RELAY_PIN, HIGH);  // Relay off
-        } else {
-            digitalWrite(RELAY_PIN, LOW);   // Relay off
+    // Handle relay pulse timing for both channels
+    for (int channel = 0; channel < 2; channel++) {
+        if (relayState[channel] && millis() > relayPulseEndTime[channel]) {
+            relayState[channel] = false;
+            int pin = (channel == 0) ? RELAY_PIN_1 : RELAY_PIN_2;
+            
+            if (RELAY_ACTIVE_LOW) {
+                digitalWrite(pin, HIGH);  // Relay off
+            } else {
+                digitalWrite(pin, LOW);   // Relay off
+            }
+            
+            Serial.println("Relay CH" + String(channel + 1) + " deactivated (pulse completed)");
+            
+            // Log state change
+            stateLogger.logStateChange(channel + 1, "RELAY", "ON", "OFF", "Pulse completed");
+            
+            if (display.isAvailable()) {
+                display.setOutputState(channel + 1, false);
+            }
         }
-        Serial.println("Relay deactivated (pulse completed)");
     }
 }
 
-void sendRelayCommand(const String& targetIP, bool activate) {
+void sendRelayCommand(const String& targetIP, int channel, bool activate) {
     if (!ethernetConnected) {
         Serial.println("Cannot send relay command: Ethernet not connected");
         return;
@@ -400,6 +438,7 @@ void sendRelayCommand(const String& targetIP, bool activate) {
     JsonDocument doc;
     doc["device_id"] = deviceID;
     doc["command"] = activate ? "relay_on" : "relay_off";
+    doc["channel"] = channel;  // Add channel information
     doc["timestamp"] = millis();
     doc["protocol_version"] = PROTOCOL_VERSION;
     
@@ -457,32 +496,44 @@ void processIncomingMessage(const String& message, const String& senderIP) {
     
     String command = doc["command"] | "";
     String senderDeviceID = doc["device_id"] | "";
+    int channel = doc["channel"] | 1;  // Default to channel 1 if not specified
     
-    Serial.println("Received command: " + command + " from " + senderDeviceID);
+    Serial.println("Received command: " + command + " for CH" + String(channel) + " from " + senderDeviceID);
     
-    if (currentMode == MODE_RELAY_RECEIVER) {
+    if (currentMode == MODE_RELAY_RECEIVER && channel >= 1 && channel <= 2) {
+        int channelIndex = channel - 1;
+        int relayPin = (channel == 1) ? RELAY_PIN_1 : RELAY_PIN_2;
+        
         if (command == "relay_on") {
-            relayState = true;
-            relayPulseEndTime = millis() + RELAY_PULSE_MS;
+            relayState[channelIndex] = true;
+            relayPulseEndTime[channelIndex] = millis() + RELAY_PULSE_MS;
             if (RELAY_ACTIVE_LOW) {
-                digitalWrite(RELAY_PIN, LOW);  // Relay on
+                digitalWrite(relayPin, LOW);  // Relay on
             } else {
-                digitalWrite(RELAY_PIN, HIGH); // Relay on
+                digitalWrite(relayPin, HIGH); // Relay on
             }
-            Serial.println("Relay activated");
+            Serial.println("Relay CH" + String(channel) + " activated");
+            
+            // Log state change
+            stateLogger.logStateChange(channel, "RELAY", "OFF", "ON", "Command received");
+            
             if (display.isAvailable()) {
-                display.setOutputState(true);
+                display.setOutputState(channel, true);
             }
         } else if (command == "relay_off") {
-            relayState = false;
+            relayState[channelIndex] = false;
             if (RELAY_ACTIVE_LOW) {
-                digitalWrite(RELAY_PIN, HIGH);  // Relay off
+                digitalWrite(relayPin, HIGH);  // Relay off
             } else {
-                digitalWrite(RELAY_PIN, LOW);   // Relay off
+                digitalWrite(relayPin, LOW);   // Relay off
             }
-            Serial.println("Relay deactivated");
+            Serial.println("Relay CH" + String(channel) + " deactivated");
+            
+            // Log state change
+            stateLogger.logStateChange(channel, "RELAY", "ON", "OFF", "Command received");
+            
             if (display.isAvailable()) {
-                display.setOutputState(false);
+                display.setOutputState(channel, false);
             }
         }
     }

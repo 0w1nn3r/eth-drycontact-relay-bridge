@@ -9,14 +9,17 @@
 #include <ArduinoJson.h>
 #include "config.h"
 #include "Display.h"
+#include "StateLogger.h"
 
 // Forward declarations
 class Display;
+class StateLogger;
 
 class WebServer {
 private:
     ESP32WebServer server;
     Display* display;
+    StateLogger* stateLogger;
     
     // References to main application variables
     String& deviceID;
@@ -29,8 +32,8 @@ private:
     String& receiverIP;
     bool& useTCP;
     bool& discoveryEnabled;
-    bool& dryContactState;
-    bool& relayState;
+    bool* dryContactState;
+    bool* relayState;
     
     // Web server handlers
     void handleRoot();
@@ -39,6 +42,13 @@ private:
     void handleMode();
     void handleStatus();
     void handleDiscovery();
+    void handleLog();
+    void handlePairing();
+    
+    // Enhanced handler methods
+    void handleScanSenders();
+    void handlePairWithSender();
+    void handleUnpairChannel();
     
     // Helper methods
     String generateRootHTML();
@@ -49,9 +59,10 @@ public:
     WebServer(String& deviceID, OperationMode& currentMode, bool& ethernetConnected,
               bool& jumperModeDetected, bool& isPaired, String& pairedDeviceID,
               String& pairedDeviceIP, String& receiverIP, bool& useTCP,
-              bool& discoveryEnabled, bool& dryContactState, bool& relayState);
+              bool& discoveryEnabled, bool* dryContactState, bool* relayState);
     
     void setDisplay(Display* displayPtr) { display = displayPtr; }
+    void setStateLogger(StateLogger* loggerPtr) { stateLogger = loggerPtr; }
     void begin();
     void handleClient();
     

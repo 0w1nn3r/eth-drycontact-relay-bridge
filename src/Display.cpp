@@ -5,9 +5,11 @@ Display::Display() : display(OLED_WIDTH, OLED_HEIGHT, &Wire, OLED_RESET),
                      lastUpdateTime(0),
                      updateInterval(1000),
                      currentMode(MODE_UNDEFINED),
-                     inputState(false),
-                     outputState(false),
                      ethernetConnected(false) {
+    inputState[0] = false;
+    inputState[1] = false;
+    outputState[0] = false;
+    outputState[1] = false;
 }
 
 bool Display::init() {
@@ -133,9 +135,13 @@ void Display::drawModeInfo() {
     display.setCursor(0, 16);
     
     if (currentMode == MODE_DRY_CONTACT_SENDER) {
-        display.println("INPUT: " + String(inputState ? "CLOSED" : "OPEN"));
+        display.println("CH1: " + String(inputState[0] ? "CLOSED" : "OPEN"));
+        display.setCursor(0, 24);
+        display.println("CH2: " + String(inputState[1] ? "CLOSED" : "OPEN"));
     } else if (currentMode == MODE_RELAY_RECEIVER) {
-        display.println("RELAY: " + String(outputState ? "ON" : "OFF"));
+        display.println("CH1: " + String(outputState[0] ? "ON" : "OFF"));
+        display.setCursor(0, 24);
+        display.println("CH2: " + String(outputState[1] ? "ON" : "OFF"));
     } else {
         display.println("Mode: Not Set");
     }
@@ -143,31 +149,31 @@ void Display::drawModeInfo() {
 
 void Display::drawNetworkInfo() {
     display.setTextSize(1);
-    display.setCursor(0, 28);
+    display.setCursor(0, 38);
     
-    // Local IP
+    // Local IP (shortened for dual channel display)
     if (ethernetConnected && localIP.length() > 0) {
-        display.println("Local: " + localIP.substring(0, 12));
+        display.println("IP: " + localIP.substring(0, 12));
     } else {
-        display.println("Local: ---.---.---.---");
+        display.println("IP: ---.---.---");
     }
     
-    // Remote IP (for sender mode)
+    // Remote IP (for sender mode) - only show if space allows
     if (currentMode == MODE_DRY_CONTACT_SENDER && remoteIP.length() > 0) {
-        display.setCursor(0, 38);
-        display.println("Remote: " + remoteIP.substring(0, 12));
+        display.setCursor(0, 46);
+        display.println("R: " + remoteIP.substring(0, 12));
     }
 }
 
 void Display::drawStateInfo() {
     display.setTextSize(1);
-    display.setCursor(0, 48);
+    display.setCursor(0, 54);
     
-    // Connection status
+    // Connection status (shortened)
     if (ethernetConnected) {
-        display.println("Status: Online");
+        display.println("Online");
     } else {
-        display.println("Status: Offline");
+        display.println("Offline");
     }
 }
 

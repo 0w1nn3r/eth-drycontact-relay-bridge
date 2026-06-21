@@ -12,6 +12,8 @@ A versatile Ethernet-based relay bridge using the Waveshare ESP32-P4-ETH board t
   - **OLED Display**: 128x64 SSD1306 display showing device status, IP addresses, and I/O states
   - **Mode Selection Jumper**: Hardware jumper on GPIO16 for mode selection (overrides software settings)
   - **Real-time Status**: Visual feedback for input/output states and network connectivity
+  - **Dual Channel Support**: Two independent dry contact inputs and two relay outputs
+  - **State Change Logging**: Comprehensive logging of all state changes with timestamps
 
 - **Network Connectivity**:
   - Wired Ethernet via LAN8720 PHY
@@ -38,8 +40,10 @@ A versatile Ethernet-based relay bridge using the Waveshare ESP32-P4-ETH board t
 | Function | GPIO Pin | Description |
 |----------|----------|-------------|
 | Mode Jumper | GPIO16 | Mode selection (LOW=Sender, HIGH=Receiver) |
-| Dry Contact Input | GPIO4 | Digital input with internal pull-up |
-| Relay Output | GPIO2 | Digital output for relay control |
+| Dry Contact Input 1 | GPIO4 | Digital input with internal pull-up (Channel 1) |
+| Dry Contact Input 2 | GPIO12 | Digital input with internal pull-up (Channel 2) |
+| Relay Output 1 | GPIO2 | Digital output for relay control (Channel 1) |
+| Relay Output 2 | GPIO15 | Digital output for relay control (Channel 2) |
 | Status LED | GPIO5 | Onboard status indicator |
 | OLED SDA | GPIO21 | I2C data line for OLED display |
 | OLED SCL | GPIO22 | I2C clock line for OLED display |
@@ -78,16 +82,18 @@ A versatile Ethernet-based relay bridge using the Waveshare ESP32-P4-ETH board t
 ### Operation Modes
 
 #### Dry Contact Sender Mode
-- Monitors GPIO4 for dry contact state changes
+- Monitors GPIO4 and GPIO12 for dry contact state changes (dual channel)
 - Sends state changes to configured receiver IP address
 - Supports both momentary and sustained contact detection
 - Configurable debounce timing (50ms default)
+- Independent channel operation with separate logging
 
 #### Relay Receiver Mode
 - Listens for commands over UDP/TCP
-- Controls GPIO2 relay output
+- Controls GPIO2 and GPIO15 relay outputs (dual channel)
 - Supports momentary relay pulses (500ms default)
 - Configurable active-high/active-low relay logic
+- Independent channel control with separate pairing for each channel
 
 ### Network Configuration
 
@@ -146,6 +152,27 @@ A hardware jumper on GPIO16 provides reliable mode selection:
 2. Connect jumper to GND for Sender mode
 3. Leave jumper open for Receiver mode
 4. Power cycle device to apply mode change
+
+### Enhanced Web Interface
+
+The device features a comprehensive web interface with advanced capabilities:
+
+#### Multi-Sender Pairing
+- **Channel-Specific Pairing**: Each channel can be paired with different senders independently
+- **Sender Discovery**: Scan the network for available sender devices
+- **Visual Pairing Management**: Intuitive interface for pairing and unpairing channels
+- **Real-time Status**: Live updates of pairing status and connection state
+
+#### State Change Logging
+- **Comprehensive Logging**: All state changes are logged with timestamps
+- **Log Viewer**: Web-based log viewer with filtering and search capabilities
+- **Event Types**: Dry contact, relay, pairing, and system events
+- **Persistent Storage**: Logs are saved to flash memory for durability
+
+#### Dual Channel Display
+- **Channel Status**: Real-time display of both channel states
+- **Independent Operation**: Each channel operates independently
+- **Visual Feedback**: Clear indication of channel states and pairing status
 
 ## Usage Examples
 

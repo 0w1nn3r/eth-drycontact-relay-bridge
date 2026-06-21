@@ -19,8 +19,8 @@ private:
     OperationMode currentMode;
     String localIP;
     String remoteIP;
-    bool inputState;     // For sender: dry contact state
-    bool outputState;    // For receiver: relay state
+    bool inputState[2];     // For sender: dry contact state for channels 1 & 2
+    bool outputState[2];    // For receiver: relay state for channels 1 & 2
     bool ethernetConnected;
     
 public:
@@ -34,8 +34,12 @@ public:
     void setMode(OperationMode mode) { currentMode = mode; }
     void setLocalIP(const String& ip) { localIP = ip; }
     void setRemoteIP(const String& ip) { remoteIP = ip; }
-    void setInputState(bool state) { inputState = state; }
-    void setOutputState(bool state) { outputState = state; }
+    void setInputState(int channel, bool state) { 
+        if (channel >= 1 && channel <= 2) inputState[channel - 1] = state; 
+    }
+    void setOutputState(int channel, bool state) { 
+        if (channel >= 1 && channel <= 2) outputState[channel - 1] = state; 
+    }
     void setEthernetConnected(bool connected) { ethernetConnected = connected; }
     bool isAvailable() const { return displayAvailable; }
     
