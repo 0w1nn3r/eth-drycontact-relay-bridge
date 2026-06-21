@@ -28,17 +28,20 @@ enum OperationMode {
 };
 
 // Mode selection jumper
-#define MODE_JUMPER_PIN 16  // GPIO pin for mode selection jumper (LOW = Sender, HIGH = Receiver)
+// Using GPIO10 to avoid strapping pin conflicts on ESP32-P4-ETH
+#define MODE_JUMPER_PIN 10  // GPIO pin for mode selection jumper (LOW = Sender, HIGH = Receiver)
 
 // Dry contact sender configuration (dual channel)
-#define DRY_CONTACT_PIN_1 4   // GPIO pin for dry contact input channel 1
-#define DRY_CONTACT_PIN_2 12  // GPIO pin for dry contact input channel 2
+// Using GPIO pins that avoid RMII interface and strapping pins on ESP32-P4-ETH
+#define DRY_CONTACT_PIN_1 14   // GPIO pin for dry contact input channel 1
+#define DRY_CONTACT_PIN_2 13  // GPIO pin for dry contact input channel 2
 #define DRY_CONTACT_DEBOUNCE_MS 50
 #define DRY_CONTACT_LONG_PRESS_MS 1000
 
 // Relay receiver configuration (dual channel)
-#define RELAY_PIN_1 2   // GPIO pin for relay output channel 1
-#define RELAY_PIN_2 15  // GPIO pin for relay output channel 2
+// Using GPIO pins that avoid RMII interface and strapping pins on ESP32-P4-ETH
+#define RELAY_PIN_1 3   // GPIO pin for relay output channel 1
+#define RELAY_PIN_2 4  // GPIO pin for relay output channel 2
 #define RELAY_ACTIVE_LOW true  // Set to true if relay is active low
 #define RELAY_PULSE_MS 500  // Pulse duration for momentary relay activation
 
@@ -62,8 +65,8 @@ enum OperationMode {
 #define OLED_WIDTH 128
 #define OLED_HEIGHT 64
 #define OLED_RESET -1  // Reset pin (-1 if sharing Arduino reset pin)
-#define OLED_SDA_PIN 21  // I2C SDA pin
-#define OLED_SCL_PIN 22  // I2C SCL pin
+#define OLED_SDA_PIN 7  // I2C SDA pin (ESP32-P4-ETH default)
+#define OLED_SCL_PIN 8  // I2C SCL pin (ESP32-P4-ETH default)
 #define OLED_ADDRESS 0x3C  // I2C address (0x3C for most 128x64 displays)
 
 // Communication protocol

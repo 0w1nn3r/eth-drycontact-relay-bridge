@@ -10,13 +10,13 @@ A versatile Ethernet-based relay bridge using the Waveshare ESP32-P4-ETH board t
 
 - **Hardware Interface**:
   - **OLED Display**: 128x64 SSD1306 display showing device status, IP addresses, and I/O states
-  - **Mode Selection Jumper**: Hardware jumper on GPIO16 for mode selection (overrides software settings)
+  - **Mode Selection Jumper**: Hardware jumper on GPIO10 for mode selection (overrides software settings)
   - **Real-time Status**: Visual feedback for input/output states and network connectivity
   - **Dual Channel Support**: Two independent dry contact inputs and two relay outputs
   - **State Change Logging**: Comprehensive logging of all state changes with timestamps
 
 - **Network Connectivity**:
-  - Wired Ethernet via LAN8720 PHY
+  - Wired Ethernet via IP101GRI PHY
   - mDNS for device discovery
   - UDP and TCP communication protocols
   - Web-based configuration interface
@@ -39,24 +39,24 @@ A versatile Ethernet-based relay bridge using the Waveshare ESP32-P4-ETH board t
 
 | Function | GPIO Pin | Description |
 |----------|----------|-------------|
-| Mode Jumper | GPIO16 | Mode selection (LOW=Sender, HIGH=Receiver) |
+| Mode Jumper | GPIO10 | Mode selection (LOW=Sender, HIGH=Receiver) |
 | Factory Reset Button | GPIO0 | BOOT button for factory reset (3-second hold) |
-| Dry Contact Input 1 | GPIO4 | Digital input with internal pull-up (Channel 1) |
-| Dry Contact Input 2 | GPIO12 | Digital input with internal pull-up (Channel 2) |
-| Relay Output 1 | GPIO2 | Digital output for relay control (Channel 1) |
-| Relay Output 2 | GPIO15 | Digital output for relay control (Channel 2) |
+| Dry Contact Input 1 | GPIO14 | Digital input with internal pull-up (Channel 1) |
+| Dry Contact Input 2 | GPIO13 | Digital input with internal pull-up (Channel 2) |
+| Relay Output 1 | GPIO3 | Digital output for relay control (Channel 1) |
+| Relay Output 2 | GPIO4 | Digital output for relay control (Channel 2) |
 | Status LED | GPIO5 | Onboard status indicator |
-| OLED SDA | GPIO21 | I2C data line for OLED display |
-| OLED SCL | GPIO22 | I2C clock line for OLED display |
-| Ethernet MDC | GPIO23 | Ethernet PHY management clock |
-| Ethernet MDIO | GPIO18 | Ethernet PHY management data |
+| OLED SDA | GPIO7 | I2C data line for OLED display (ESP32-P4-ETH default) |
+| OLED SCL | GPIO8 | I2C clock line for OLED display (ESP32-P4-ETH default) |
+| Ethernet MDC | GPIO31 | IP101GRI PHY management clock |
+| Ethernet MDIO | GPIO52 | IP101GRI PHY management data |
 
 ## Installation
 
 1. **Clone the repository**:
    ```bash
-   git clone https://github.com/your-username/eth-relay-bridge.git
-   cd eth-relay-bridge
+   git clone https://github.com/0w1nn3r/eth-drycontact-relay-bridge.git
+   cd eth-drycontact-relay-bridge
    ```
 
 2. **Open in PlatformIO**:
@@ -149,7 +149,7 @@ A hardware jumper on GPIO16 provides reliable mode selection:
 - Web interface shows "(Jumper Set)" when hardware mode is active
 
 **Usage:**
-1. Install jumper pin on GPIO16 header
+1. Install jumper pin on GPIO10 header
 2. Connect jumper to GND for Sender mode
 3. Leave jumper open for Receiver mode
 4. Power cycle device to apply mode change
