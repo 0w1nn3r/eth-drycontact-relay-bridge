@@ -30,7 +30,6 @@ private:
     String& pairedDeviceID;
     String& pairedDeviceIP;
     String& receiverIP;
-    bool& useTCP;
     bool& discoveryEnabled;
     bool* dryContactState;
     bool* relayState;
@@ -62,7 +61,7 @@ private:
 public:
     WebServer(String& deviceID, OperationMode& currentMode, bool& ethernetConnected,
               bool& jumperModeDetected, bool& isPaired, String& pairedDeviceID,
-              String& pairedDeviceIP, String& receiverIP, bool& useTCP,
+              String& pairedDeviceIP, String& receiverIP,
               bool& discoveryEnabled, bool* dryContactState, bool* relayState,
               String& channel1Name, String& channel2Name);
     

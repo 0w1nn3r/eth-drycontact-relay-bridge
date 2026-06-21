@@ -33,7 +33,6 @@ unsigned long relayPulseEndTime[2] = {0, 0};
 // Network configuration
 String deviceID = "";
 String receiverIP = "";
-bool useTCP = false;  // false for UDP, true for TCP
 
 // Mode jumper state
 bool jumperModeDetected = false;
@@ -64,7 +63,7 @@ bool factoryResetBootDetection = false;
 // Display and Web server objects
 Display display;
 WebServer webServer(deviceID, currentMode, ethernetConnected, jumperModeDetected,
-                   isPaired[0], pairedDeviceID[0], pairedDeviceIP[0], receiverIP, useTCP,
+                   isPaired[0], pairedDeviceID[0], pairedDeviceIP[0], receiverIP,
                    discoveryEnabled, dryContactState, relayState, channel1Name, channel2Name);
 
 // Function prototypes
@@ -339,17 +338,14 @@ void loadConfiguration() {
     currentMode = (OperationMode)EEPROM.read(EEPROM_MODE_ADDR);
     
     // Load other configuration settings
-    // This would be expanded to load receiver IP, protocol choice, etc.
     Preferences preferences;
     preferences.begin("eth-relay", false);
     receiverIP = preferences.getString("receiverIP", "");
-    useTCP = preferences.getBool("useTCP", false);
     preferences.end();
     
     Serial.println("Configuration loaded:");
     Serial.println("  Mode: " + String(currentMode));
     Serial.println("  Receiver IP: " + receiverIP);
-    Serial.println("  Use TCP: " + String(useTCP ? "Yes" : "No"));
 }
 
 void saveConfiguration() {
@@ -361,7 +357,6 @@ void saveConfiguration() {
     Preferences preferences;
     preferences.begin("eth-relay", false);
     preferences.putString("receiverIP", receiverIP);
-    preferences.putBool("useTCP", useTCP);
     preferences.end();
     
     Serial.println("Configuration saved");
@@ -475,31 +470,25 @@ void sendRelayCommand(const String& targetIP, int channel, bool activate) {
     JsonDocument doc;
     doc["device_id"] = deviceID;
     doc["command"] = activate ? "relay_on" : "relay_off";
-    doc["channel"] = channel;  // Add channel information
+    doc["channel"] = channel;
     doc["timestamp"] = millis();
     doc["protocol_version"] = PROTOCOL_VERSION;
     
     String message;
     serializeJson(doc, message);
     
-    if (useTCP) {
-        // Send via TCP
-        HTTPClient http;
-        http.begin("http://" + targetIP + ":" + String(TCP_PORT) + "/command");
-        http.addHeader("Content-Type", "application/json");
-        int httpResponseCode = http.POST(message);
-        
-        if (httpResponseCode > 0) {
-            Serial.println("TCP command sent successfully. Response code: " + String(httpResponseCode));
-        } else {
-            Serial.println("Error sending TCP command: " + String(httpResponseCode));
-        }
-        http.end();
+    // Send via TCP
+    HTTPClient http;
+    http.begin("http://" + targetIP + ":" + String(TCP_PORT) + "/command");
+    http.addHeader("Content-Type", "application/json");
+    int httpResponseCode = http.POST(message);
+    
+    if (httpResponseCode > 0) {
+        Serial.println("TCP command sent successfully. Response code: " + String(httpResponseCode));
     } else {
-        // Send via UDP (would need WiFiUDP implementation)
-        Serial.println("UDP command: " + message + " to " + targetIP + ":" + String(UDP_PORT));
-        // TODO: Implement UDP sending
+        Serial.println("Error sending TCP command: " + String(httpResponseCode));
     }
+    http.end();
 }
 
 void sendHeartbeat() {

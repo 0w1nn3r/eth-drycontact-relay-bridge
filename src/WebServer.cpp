@@ -2,7 +2,7 @@
 
 WebServer::WebServer(String& deviceID, OperationMode& currentMode, bool& ethernetConnected,
                      bool& jumperModeDetected, bool& isPaired, String& pairedDeviceID,
-                     String& pairedDeviceIP, String& receiverIP, bool& useTCP,
+                     String& pairedDeviceIP, String& receiverIP,
                      bool& discoveryEnabled, bool* dryContactState, bool* relayState,
                      String& channel1Name, String& channel2Name)
     : server(WEB_PORT),
@@ -16,7 +16,6 @@ WebServer::WebServer(String& deviceID, OperationMode& currentMode, bool& etherne
       pairedDeviceID(pairedDeviceID),
       pairedDeviceIP(pairedDeviceIP),
       receiverIP(receiverIP),
-      useTCP(useTCP),
       discoveryEnabled(discoveryEnabled),
       dryContactState(dryContactState),
       relayState(relayState),
@@ -53,184 +52,193 @@ void WebServer::handleRoot() {
 }
 
 String WebServer::generateRootHTML() {
-    String html = "<!DOCTYPE html><html><head>";
-    html += "<title>" + String(BOARD_NAME) + "</title>";
-    html += "<meta name=\"viewport\" content=\"width=device-width, initial-scale=1\">";
-    html += "<style>";
-    html += "body { font-family: Arial, sans-serif; margin: 20px; }";
-    html += ".container { max-width: 600px; margin: 0 auto; }";
-    html += ".status { background: #f0f0f0; padding: 10px; margin: 10px 0; border-radius: 5px; }";
-    html += ".button { background: #007bff; color: white; padding: 10px 20px; border: none; border-radius: 5px; cursor: pointer; }";
-    html += ".button:hover { background: #0056b3; }";
-    html += ".form-group { margin: 10px 0; }";
-    html += "label { display: block; margin-bottom: 5px; }";
-    html += "input, select { width: 100%; padding: 8px; border: 1px solid #ddd; border-radius: 4px; }";
-    html += "</style></head><body>";
-    html += "<div class=\"container\">";
-    html += "<h1>" + String(BOARD_NAME) + "</h1>";
-    html += "<div class=\"status\">";
-    html += "<h3>Device Status</h3>";
-    html += "<p><strong>Device ID:</strong> " + deviceID + "</p>";
-    html += "<p><strong>Firmware:</strong> " + String(FIRMWARE_VERSION) + "</p>";
-    html += "<p><strong>Mode:</strong> <span id=\"mode\">" + String(currentMode) + "</span>" + String(jumperModeDetected ? " (Jumper Set)" : "") + "</p>";
-    html += "<p><strong>Ethernet:</strong> <span id=\"ethernet\">" + String(ethernetConnected ? "Connected" : "Disconnected") + "</span></p>";
-    html += "<p><strong>IP Address:</strong> " + ETH.localIP().toString() + "</p>";
-    html += "<p><strong>Subnet Mask:</strong> " + ETH.subnetMask().toString() + "</p>";
-    html += "<p><strong>Gateway:</strong> " + ETH.gatewayIP().toString() + "</p>";
-    html += "<p><strong>DNS Server:</strong> " + ETH.dnsIP().toString() + "</p>";
-    html += "<p><strong>Paired:</strong> <span id=\"paired-status\">" + String(isPaired ? "Yes" : "No") + "</span></p>";
-    html += "<p><strong>Paired Device:</strong> <span id=\"paired-device\">" + (isPaired ? pairedDeviceID : "None") + "</span></p>";
-    html += "<p><strong>Paired IP:</strong> <span id=\"paired-ip\">" + (isPaired ? pairedDeviceIP : "None") + "</span></p>";
-    html += "</div>";
+    String html = R"=====(
+<!DOCTYPE html>
+<html>
+<head>
+    <title>)=====" + String(BOARD_NAME) + R"=====(</title>
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <style>
+        body { font-family: Arial, sans-serif; margin: 20px; }
+        .container { max-width: 600px; margin: 0 auto; }
+        .status { background: #f0f0f0; padding: 10px; margin: 10px 0; border-radius: 5px; }
+        .button { background: #007bff; color: white; padding: 10px 20px; border: none; border-radius: 5px; cursor: pointer; }
+        .button:hover { background: #0056b3; }
+        .form-group { margin: 10px 0; }
+        label { display: block; margin-bottom: 5px; }
+        input, select { width: 100%; padding: 8px; border: 1px solid #ddd; border-radius: 4px; }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <h1>)=====" + String(BOARD_NAME) + R"=====(</h1>
+        <div class="status">
+            <h3>Device Status</h3>
+            <p><strong>Device ID:</strong> )=====" + deviceID + R"=====(</p>
+            <p><strong>Firmware:</strong> )=====" + FIRMWARE_VERSION + R"=====(</p>
+            <p><strong>Mode:</strong> <span id="mode">)=====" + String(currentMode) + R"=====(</span>)=====" + String(jumperModeDetected ? " (Jumper Set)" : "") + R"=====(</p>
+            <p><strong>Ethernet:</strong> <span id="ethernet">)=====" + String(ethernetConnected ? "Connected" : "Disconnected") + R"=====(</span></p>
+            <p><strong>IP Address:</strong> )=====" + ETH.localIP().toString() + R"=====(</p>
+            <p><strong>Subnet Mask:</strong> )=====" + ETH.subnetMask().toString() + R"=====(</p>
+            <p><strong>Gateway:</strong> )=====" + ETH.gatewayIP().toString() + R"=====(</p>
+            <p><strong>DNS Server:</strong> )=====" + ETH.dnsIP().toString() + R"=====(</p>
+            <p><strong>Paired:</strong> <span id="paired-status">)=====" + String(isPaired ? "Yes" : "No") + R"=====(</span></p>
+            <p><strong>Paired Device:</strong> <span id="paired-device">)=====" + (isPaired ? pairedDeviceID : "None") + R"=====(</span></p>
+            <p><strong>Paired IP:</strong> <span id="paired-ip">)=====" + (isPaired ? pairedDeviceIP : "None") + R"=====(</span></p>
+        </div>
+        
+        <div class="form-group">
+            <h3>Configuration</h3>
+            <form method="POST" action="/mode">
+                <label for="operationMode">Operation Mode:</label>
+                <select name="mode" id="operationMode">
+                    <option value="0">Not Configured</option>
+                    <option value="1">Dry Contact Sender</option>
+                    <option value="2">Relay Receiver</option>
+                </select>
+                <br><br>
+                <label for="receiverIP">Receiver IP (for Sender mode):</label>
+                <input type="text" id="receiverIP" name="receiverIP" placeholder="192.168.1.100" value=")=====" + receiverIP + R"=====(">
+                <br><br>
+                <button type="submit" class="button">Save Configuration</button>
+            </form>
+            <br>
+            <div class="channel-naming">
+                <h3>Channel Names</h3>
+                <form id="channelNamesForm">
+                    <label for="channel1Name">Channel 1 Name:</label>
+                    <input type="text" id="channel1Name" name="channel1Name" maxlength="15" placeholder="Channel1" value=")=====" + channel1Name + R"=====(">
+                    <small>Single word, max 15 characters</small>
+                    <br><br>
+                    <label for="channel2Name">Channel 2 Name:</label>
+                    <input type="text" id="channel2Name" name="channel2Name" maxlength="15" placeholder="Channel2" value=")=====" + channel2Name + R"=====(">
+                    <small>Single word, max 15 characters</small>
+                    <br><br>
+                    <button type="button" class="button" onclick="saveChannelNames()">Save Channel Names</button>
+                </form>
+            </div>
+            <br>
+            <div class="pairing-controls">
+                <h3>Pairing Management</h3>
+                <button type="button" class="button" onclick="toggleDiscovery()" id="discovery-btn">)=====" + String(discoveryEnabled ? "Disable Discovery" : "Enable Discovery") + R"=====(</button>
+                <br><br>
+                )=====" + String(currentMode == MODE_RELAY_RECEIVER && !isPaired ? "<button type=\"button\" class=\"button\" onclick=\"scanForSenders()\" style=\"background-color: #ff9800;\">Scan for Senders</button>" : "") + R"=====(
+                )=====" + String(isPaired ? "<button type=\"button\" class=\"button\" onclick=\"unpairDevice()\" style=\"background-color: #f44336;\">Unpair Device</button>" : "") + R"=====(
+            </div>
+        </div>
+        <br>
+        <div class="log-controls">
+            <h3>State Change Log</h3>
+            <a href="/log" class="button">View Log</a>
+        </div>
+    </div>
     
-    html += "<div class=\"form-group\">";
-    html += "<h3>Configuration</h3>";
-    html += "<form method=\"POST\" action=\"/mode\">";
-    html += "<label for=\"operationMode\">Operation Mode:</label>";
-    html += "<select name=\"mode\" id=\"operationMode\">";
-    html += "<option value=\"0\">Not Configured</option>";
-    html += "<option value=\"1\">Dry Contact Sender</option>";
-    html += "<option value=\"2\">Relay Receiver</option>";
-    html += "</select>";
-    html += "<br><br>";
-    html += "<label for=\"receiverIP\">Receiver IP (for Sender mode):</label>";
-    html += "<input type=\"text\" id=\"receiverIP\" name=\"receiverIP\" placeholder=\"192.168.1.100\" value=\"" + receiverIP + "\">";
-    html += "<br><br>";
-    html += "<label>";
-    html += "<input type=\"checkbox\" name=\"useTCP\" " + String(useTCP ? "checked" : "") + ">";
-    html += "Use TCP instead of UDP";
-    html += "</label>";
-    html += "<br><br>";
-    html += "<button type=\"submit\" class=\"button\">Save Configuration</button>";
-    html += "</form>";
-    html += "<br>";
-    html += "<div class=\"channel-naming\">";
-    html += "<h3>Channel Names</h3>";
-    html += "<form id=\"channelNamesForm\">";
-    html += "<label for=\"channel1Name\">Channel 1 Name:</label>";
-    html += "<input type=\"text\" id=\"channel1Name\" name=\"channel1Name\" maxlength=\"15\" placeholder=\"Channel1\" value=\"" + channel1Name + "\">";
-    html += "<small>Single word, max 15 characters</small>";
-    html += "<br><br>";
-    html += "<label for=\"channel2Name\">Channel 2 Name:</label>";
-    html += "<input type=\"text\" id=\"channel2Name\" name=\"channel2Name\" maxlength=\"15\" placeholder=\"Channel2\" value=\"" + channel2Name + "\">";
-    html += "<small>Single word, max 15 characters</small>";
-    html += "<br><br>";
-    html += "<button type=\"button\" class=\"button\" onclick=\"saveChannelNames()\">Save Channel Names</button>";
-    html += "</form>";
-    html += "</div>";
-    html += "<br>";
-    html += "<div class=\"pairing-controls\">";
-    html += "<h3>Pairing Management</h3>";
-    html += "<button type=\"button\" class=\"button\" onclick=\"toggleDiscovery()\" id=\"discovery-btn\">" + String(discoveryEnabled ? "Disable Discovery" : "Enable Discovery") + "</button>";
-    html += "<br><br>";
-    html += String(currentMode == MODE_RELAY_RECEIVER && !isPaired ? "<button type=\"button\" class=\"button\" onclick=\"scanForSenders()\" style=\"background-color: #ff9800;\">Scan for Senders</button>" : "");
-    html += String(isPaired ? "<button type=\"button\" class=\"button\" onclick=\"unpairDevice()\" style=\"background-color: #f44336;\">Unpair Device</button>" : "");
-    html += "</div>";
-    html += "</div>";
-    html += "<br>";
-    html += "<div class=\"log-controls\">";
-    html += "<h3>State Change Log</h3>";
-    html += "<a href=\"/log\" class=\"button\">View Log</a>";
-    html += "</div>";
-    html += "</div>";
-    
-    html += "<script>";
-    html += "setInterval(function() {";
-    html += "fetch('/api')";
-    html += ".then(response => response.json())";
-    html += ".then(data => {";
-    html += "document.getElementById('mode').textContent = data.mode_text || 'Unknown';";
-    html += "document.getElementById('ethernet').textContent = data.ethernet_connected ? 'Connected' : 'Disconnected';";
-    html += "document.getElementById('paired-status').textContent = data.is_paired ? 'Yes' : 'No';";
-    html += "document.getElementById('paired-device').textContent = data.paired_device_id || 'None';";
-    html += "document.getElementById('paired-ip').textContent = data.paired_device_ip || 'None';";
-    html += "document.getElementById('discovery-btn').textContent = data.discovery_enabled ? 'Disable Discovery' : 'Enable Discovery';";
-    html += "})";
-    html += ".catch(error => console.log('Error:', error));";
-    html += "}, 2000);";
-    html += "function toggleDiscovery() {";
-    html += "fetch('/api', {";
-    html += "method: 'POST',";
-    html += "headers: {'Content-Type': 'application/json'},";
-    html += "body: JSON.stringify({action: 'toggle_discovery'})";
-    html += "})";
-    html += ".then(response => response.json())";
-    html += ".then(data => {";
-    html += "console.log('Discovery toggled:', data);";
-    html += "location.reload();";
-    html += "})";
-    html += ".catch(error => console.log('Error:', error));";
-    html += "}";
-    html += "function scanForSenders() {";
-    html += "document.getElementById('paired-device').textContent = 'Scanning...';";
-    html += "fetch('/api', {";
-    html += "method: 'POST',";
-    html += "headers: {'Content-Type': 'application/json'},";
-    html += "body: JSON.stringify({action: 'scan_senders'})";
-    html += "})";
-    html += ".then(response => response.json())";
-    html += ".then(data => {";
-    html += "console.log('Scan completed:', data);";
-    html += "setTimeout(() => location.reload(), 3000);";
-    html += "})";
-    html += ".catch(error => console.log('Error:', error));";
-    html += "}";
-    html += "function unpairDevice() {";
-    html += "if (confirm('Are you sure you want to unpair this device?')) {";
-    html += "fetch('/api', {";
-    html += "method: 'POST',";
-    html += "headers: {'Content-Type': 'application/json'},";
-    html += "body: JSON.stringify({action: 'unpair_device'})";
-    html += "})";
-    html += ".then(response => response.json())";
-    html += ".then(data => {";
-    html += "console.log('Device unpaired:', data);";
-    html += "location.reload();";
-    html += "})";
-    html += ".catch(error => console.log('Error:', error));";
-    html += "}";
-    html += "}";
-    html += "function saveChannelNames() {";
-    html += "const channel1Name = document.getElementById('channel1Name').value.trim();";
-    html += "const channel2Name = document.getElementById('channel2Name').value.trim();";
-    html += "if (!channel1Name || !channel2Name) {";
-    html += "alert('Please enter names for both channels');";
-    html += "return;";
-    html += "}";
-    html += "if (channel1Name.indexOf(' ') >= 0 || channel2Name.indexOf(' ') >= 0) {";
-    html += "alert('Channel names must be single words (no spaces)');";
-    html += "return;";
-    html += "}";
-    html += "if (channel1Name.length > 15 || channel2Name.length > 15) {";
-    html += "alert('Channel names must be 15 characters or less');";
-    html += "return;";
-    html += "}";
-    html += "fetch('/channel_names', {";
-    html += "method: 'POST',";
-    html += "headers: {'Content-Type': 'application/json'},";
-    html += "body: JSON.stringify({";
-    html += "channel1_name: channel1Name,";
-    html += "channel2_name: channel2Name";
-    html += "})";
-    html += "})";
-    html += ".then(response => response.json())";
-    html += ".then(data => {";
-    html += "if (data.status === 'success') {";
-    html += "console.log('Channel names saved:', data);";
-    html += "alert('Channel names updated successfully!');";
-    html += "} else {";
-    html += "console.error('Error saving channel names:', data);";
-    html += "alert('Error: ' + data.message);";
-    html += "}";
-    html += "})";
-    html += ".catch(error => {";
-    html += "console.error('Error:', error);";
-    html += "alert('Error saving channel names');";
-    html += "});";
-    html += "}";
-    html += "</script>";
-    html += "</body></html>";
-    
+    <script>
+        setInterval(function() {
+            fetch('/api')
+                .then(response => response.json())
+                .then(data => {
+                    document.getElementById('mode').textContent = data.mode_text || 'Unknown';
+                    document.getElementById('ethernet').textContent = data.ethernet_connected ? 'Connected' : 'Disconnected';
+                    document.getElementById('paired-status').textContent = data.is_paired ? 'Yes' : 'No';
+                    document.getElementById('paired-device').textContent = data.paired_device_id || 'None';
+                    document.getElementById('paired-ip').textContent = data.paired_device_ip || 'None';
+                    document.getElementById('discovery-btn').textContent = data.discovery_enabled ? 'Disable Discovery' : 'Enable Discovery';
+                })
+                .catch(error => console.log('Error:', error));
+        }, 2000);
+        
+        function toggleDiscovery() {
+            fetch('/api', {
+                method: 'POST',
+                headers: {'Content-Type': 'application/json'},
+                body: JSON.stringify({action: 'toggle_discovery'})
+            })
+            .then(response => response.json())
+            .then(data => {
+                console.log('Discovery toggled:', data);
+                location.reload();
+            })
+            .catch(error => console.log('Error:', error));
+        }
+        
+        function scanForSenders() {
+            document.getElementById('paired-device').textContent = 'Scanning...';
+            fetch('/api', {
+                method: 'POST',
+                headers: {'Content-Type': 'application/json'},
+                body: JSON.stringify({action: 'scan_senders'})
+            })
+            .then(response => response.json())
+            .then(data => {
+                console.log('Scan completed:', data);
+                setTimeout(() => location.reload(), 3000);
+            })
+            .catch(error => console.log('Error:', error));
+        }
+        
+        function unpairDevice() {
+            if (confirm('Are you sure you want to unpair this device?')) {
+                fetch('/api', {
+                    method: 'POST',
+                    headers: {'Content-Type': 'application/json'},
+                    body: JSON.stringify({action: 'unpair_device'})
+                })
+                .then(response => response.json())
+                .then(data => {
+                    console.log('Device unpaired:', data);
+                    location.reload();
+                })
+                .catch(error => console.log('Error:', error));
+            }
+        }
+        
+        function saveChannelNames() {
+            const channel1Name = document.getElementById('channel1Name').value.trim();
+            const channel2Name = document.getElementById('channel2Name').value.trim();
+            
+            if (!channel1Name || !channel2Name) {
+                alert('Please enter names for both channels');
+                return;
+            }
+            
+            if (channel1Name.indexOf(' ') >= 0 || channel2Name.indexOf(' ') >= 0) {
+                alert('Channel names must be single words (no spaces)');
+                return;
+            }
+            
+            if (channel1Name.length > 15 || channel2Name.length > 15) {
+                alert('Channel names must be 15 characters or less');
+                return;
+            }
+            
+            fetch('/channel_names', {
+                method: 'POST',
+                headers: {'Content-Type': 'application/json'},
+                body: JSON.stringify({
+                    channel1_name: channel1Name,
+                    channel2_name: channel2Name
+                })
+            })
+            .then(response => response.json())
+            .then(data => {
+                if (data.status === 'success') {
+                    console.log('Channel names saved:', data);
+                    alert('Channel names updated successfully!');
+                } else {
+                    console.error('Error saving channel names:', data);
+                    alert('Error: ' + data.message);
+                }
+            })
+            .catch(error => {
+                console.error('Error:', error);
+                alert('Error saving channel names');
+            });
+        }
+    </script>
+</body>
+</html>
+)=====";
     return html;
 }
 
@@ -300,7 +308,6 @@ void WebServer::handleAPI() {
         dcArray.add(dryContactState[0]);
         dcArray.add(dryContactState[1]);
         doc["receiver_ip"] = receiverIP;
-        doc["use_tcp"] = useTCP;
     } else if (currentMode == MODE_RELAY_RECEIVER) {
         doc["relay_state"] = JsonArray();
         JsonArray relayArray = doc["relay_state"].to<JsonArray>();
@@ -330,14 +337,10 @@ void WebServer::handleConfig() {
         if (server.hasArg("receiverIP")) {
             receiverIP = server.arg("receiverIP");
         }
-        if (server.hasArg("useTCP")) {
-            useTCP = server.arg("useTCP") == "on";
-        }
         server.send(200, "text/plain", "Configuration saved");
     } else {
         JsonDocument doc;
         doc["receiver_ip"] = receiverIP;
-        doc["use_tcp"] = useTCP;
         String response;
         serializeJson(doc, response);
         server.send(200, "application/json", response);
@@ -477,39 +480,46 @@ void WebServer::unpairDevice() {
 void WebServer::handleLog() {
     if (stateLogger) {
         String logHTML = stateLogger->getRecentLogHTML(50);
-        String html = "<!DOCTYPE html><html><head>";
-        html += "<title>State Change Log - " + String(BOARD_NAME) + "</title>";
-        html += "<meta name=\"viewport\" content=\"width=device-width, initial-scale=1\">";
-        html += "<style>";
-        html += "body { font-family: Arial, sans-serif; margin: 20px; background: #f5f5f5; }";
-        html += ".container { max-width: 800px; margin: 0 auto; background: white; padding: 20px; border-radius: 8px; }";
-        html += ".log-entry { padding: 8px; margin: 4px 0; border-left: 3px solid #ddd; background: #f9f9f9; }";
-        html += ".log-time { color: #666; font-size: 0.9em; margin-right: 10px; }";
-        html += ".log-channel { background: #007bff; color: white; padding: 2px 6px; border-radius: 3px; font-size: 0.8em; margin-right: 8px; }";
-        html += ".log-event { font-weight: bold; margin-right: 8px; }";
-        html += ".log-event.dry_contact { color: #28a745; }";
-        html += ".log-event.relay { color: #dc3545; }";
-        html += ".log-event.pairing { color: #ffc107; }";
-        html += ".log-event.system { color: #6c757d; }";
-        html += ".log-device { color: #495057; margin-right: 8px; }";
-        html += ".log-change { color: #007bff; margin-right: 8px; }";
-        html += ".log-desc { color: #6c757d; }";
-        html += ".header { text-align: center; margin-bottom: 30px; }";
-        html += ".refresh-btn { background: #007bff; color: white; padding: 10px 20px; border: none; border-radius: 4px; cursor: pointer; margin: 10px; }";
-        html += ".refresh-btn:hover { background: #0056b3; }";
-        html += "</style></head><body>";
-        html += "<div class=\"container\">";
-        html += "<div class=\"header\">";
-        html += "<h1>State Change Log</h1>";
-        html += "<p>Device: " + deviceID + "</p>";
-        html += "<button class=\"refresh-btn\" onclick=\"location.reload()\">Refresh</button>";
-        html += "<a href=\"/\" class=\"refresh-btn\">Back to Main</a>";
-        html += "</div>";
-        html += "<div class=\"log-container\">";
-        html += logHTML;
-        html += "</div>";
-        html += "</div>";
-        html += "</body></html>";
+        String html = R"=====(
+<!DOCTYPE html>
+<html>
+<head>
+    <title>State Change Log - )=====" + String(BOARD_NAME) + R"=====(</title>
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <style>
+        body { font-family: Arial, sans-serif; margin: 20px; background: #f5f5f5; }
+        .container { max-width: 800px; margin: 0 auto; background: white; padding: 20px; border-radius: 8px; }
+        .log-entry { padding: 8px; margin: 4px 0; border-left: 3px solid #ddd; background: #f9f9f9; }
+        .log-time { color: #666; font-size: 0.9em; margin-right: 10px; }
+        .log-channel { background: #007bff; color: white; padding: 2px 6px; border-radius: 3px; font-size: 0.8em; margin-right: 8px; }
+        .log-event { font-weight: bold; margin-right: 8px; }
+        .log-event.dry_contact { color: #28a745; }
+        .log-event.relay { color: #dc3545; }
+        .log-event.pairing { color: #ffc107; }
+        .log-event.system { color: #6c757d; }
+        .log-device { color: #495057; margin-right: 8px; }
+        .log-change { color: #007bff; margin-right: 8px; }
+        .log-desc { color: #6c757d; }
+        .header { text-align: center; margin-bottom: 30px; }
+        .refresh-btn { background: #007bff; color: white; padding: 10px 20px; border: none; border-radius: 4px; cursor: pointer; margin: 10px; }
+        .refresh-btn:hover { background: #0056b3; }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <div class="header">
+            <h1>State Change Log</h1>
+            <p>Device: )=====" + deviceID + R"=====(</p>
+            <button class="refresh-btn" onclick="location.reload()">Refresh</button>
+            <a href="/" class="refresh-btn">Back to Main</a>
+        </div>
+        <div class="log-container">
+            )=====" + logHTML + R"=====(
+        </div>
+    </div>
+</body>
+</html>
+)=====";
         server.send(200, "text/html", html);
     } else {
         server.send(500, "text/plain", "Logger not available");
@@ -517,11 +527,11 @@ void WebServer::handleLog() {
 }
 
 void WebServer::handlePairing() {
-    String html = R"(
+    String html = R"=====(
 <!DOCTYPE html>
 <html>
 <head>
-    <title>Pairing Management - )" + String(BOARD_NAME) + R"(</title>
+    <title>Pairing Management - )=====" + String(BOARD_NAME) + R"=====(</title>
     <meta name="viewport" content="width=device-width, initial-scale=1">
     <style>
         body { font-family: Arial, sans-serif; margin: 20px; background: #f5f5f5; }
@@ -547,20 +557,20 @@ void WebServer::handlePairing() {
 <body>
     <div class="container">
         <h1>Pairing Management</h1>
-        <p>Device: )" + deviceID + R"(</p>
+        <p>Device: )=====" + deviceID + R"=====(</p>
         <a href="/" class="btn">Back to Main</a>
         
         <div class="channel">
             <h3>Channel 1</h3>
-            <p>Current pairing: <span id="ch1-status">)" + (isPaired ? pairedDeviceID : "Not paired") + R"(</span></p>
+            <p>Current pairing: <span id="ch1-status">)=====" + (isPaired ? pairedDeviceID : "Not paired") + R"=====(</span></p>
             <button class="btn" onclick="scanSenders(1) ">Scan for Senders</button>
-            )" + (isPaired ? "<button class=\"btn danger\" onclick=\"unpairChannel(1)\">Unpair</button>" : "") + R"(
+            )=====" + (isPaired ? "<button class=\"btn danger\" onclick=\"unpairChannel(1)\">Unpair</button>" : "") + R"=====(
             <div id="ch1-senders" class="sender-list"></div>
         </div>
         
         <div class="channel">
             <h3>Channel 2</h3>
-            <p>Current pairing: <span id="ch2-status">)" + (isPaired ? pairedDeviceID : "Not paired") + R"(</span></p>
+            <p>Current pairing: <span id="ch2-status">)=====" + (isPaired ? pairedDeviceID : "Not paired") + R"=====(</span></p>
             <button class="btn" onclick="scanSenders(2) ">Scan for Senders</button>
             <button class="btn danger" onclick="unpairChannel(2) ">Unpair</button>
             <div id="ch2-senders" class="sender-list"></div>
@@ -658,7 +668,8 @@ void WebServer::handlePairing() {
         }
     </script>
 </body>
-</html>)";
+</html>
+)=====";
     server.send(200, "text/html", html);
 }
 
