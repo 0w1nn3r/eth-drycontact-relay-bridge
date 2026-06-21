@@ -518,12 +518,27 @@ void sendHeartbeat() {
     String message;
     serializeJson(doc, message);
 
-    // Broadcast heartbeat so the paired peer can track our liveness.
-    udp.beginPacket("255.255.255.255", DEVICE_DISCOVERY_PORT);
+    // Once we know our peer's address, unicast the heartbeat directly to it:
+    // a receiver targets its paired sender, a sender its configured receiver.
+    // Unicast is routable across subnets and avoids LAN broadcast noise; we
+    // fall back to broadcast only when no peer is known yet.
+    String peerIP = "";
+    if (currentMode == MODE_RELAY_RECEIVER && isPaired) {
+        peerIP = pairedDeviceIP;
+    } else if (currentMode == MODE_DRY_CONTACT_SENDER) {
+        peerIP = receiverIP;
+    }
+
+    if (peerIP.length() > 0) {
+        udp.beginPacket(peerIP.c_str(), DEVICE_DISCOVERY_PORT);
+    } else {
+        udp.beginPacket("255.255.255.255", DEVICE_DISCOVERY_PORT);
+    }
     udp.print(message);
     udp.endPacket();
 
-    Serial.println("Heartbeat broadcast sent: " + message);
+    Serial.println(String("Heartbeat sent to ") +
+                   (peerIP.length() > 0 ? peerIP : String("broadcast")) + ": " + message);
 }
 
 void processIncomingMessage(const String& message, const String& senderIP) {
