@@ -72,6 +72,13 @@ enum OperationMode {
 #define PEER_OFFLINE_TIMEOUT_MS 90000
 #define DEVICE_DISCOVERY_PORT 8900
 
+// UPS (SNMP) polling for sender mode
+#define SNMP_DEFAULT_PORT 161
+#define SNMP_LOCAL_PORT 16100            // local UDP port for SNMP responses
+#define SNMP_TIMEOUT_MS 800              // per-poll response timeout
+#define UPS_DEFAULT_POLL_INTERVAL_S 10
+#define UPS_FAIL_ALARM_COUNT 3           // consecutive poll failures -> fail to alarm
+
 // Web interface
 #define WEB_UPDATE_INTERVAL_MS 2000
 #define MAX_CLIENTS 4

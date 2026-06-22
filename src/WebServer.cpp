@@ -3,8 +3,9 @@
 WebServer::WebServer(String& deviceID, OperationMode& currentMode, bool& ethernetConnected,
                      bool& jumperModeDetected, bool& isPaired, String& pairedDeviceID,
                      String& pairedDeviceIP, String& receiverIP,
-                     bool& discoveryEnabled, bool& peerOnline, bool* dryContactState,
-                     bool* relayState, String& channel1Name, String& channel2Name)
+                     bool& discoveryEnabled, bool& peerOnline, UpsState& ups,
+                     bool* dryContactState, bool* relayState,
+                     String& channel1Name, String& channel2Name)
     : server(WEB_PORT),
       display(nullptr),
       stateLogger(nullptr),
@@ -18,6 +19,7 @@ WebServer::WebServer(String& deviceID, OperationMode& currentMode, bool& etherne
       receiverIP(receiverIP),
       discoveryEnabled(discoveryEnabled),
       peerOnline(peerOnline),
+      ups(ups),
       dryContactState(dryContactState),
       relayState(relayState),
       channel1Name(channel1Name),
@@ -35,6 +37,7 @@ void WebServer::begin() {
     server.on("/pairing", HTTP_ANY, std::bind(&WebServer::handlePairing, this));
     server.on("/command", HTTP_POST, std::bind(&WebServer::handleCommand, this));
     server.on("/channel_names", HTTP_ANY, std::bind(&WebServer::handleChannelNames, this));
+    server.on("/ups_config", HTTP_ANY, std::bind(&WebServer::handleUpsConfig, this));
     
     server.begin();
     Serial.println("HTTP server started");
@@ -50,6 +53,39 @@ void WebServer::handleRoot() {
 }
 
 String WebServer::generateRootHTML() {
+    // UPS (SNMP) input config is only relevant in sender mode.
+    String upsSection = "";
+    if (currentMode == MODE_DRY_CONTACT_SENDER) {
+        String status;
+        if (ups.ip.length() == 0) {
+            status = "Not configured";
+        } else if (!ups.reachable) {
+            status = "Unreachable";
+        } else {
+            status = "Reachable";
+            if (ups.onBattery) status += ", ON BATTERY";
+            if (ups.batteryLow) status += ", BATTERY LOW";
+        }
+        upsSection += "<br><div class=\"ups-config\">";
+        upsSection += "<h3>UPS (SNMP) Input</h3>";
+        upsSection += "<p>Poll a network UPS over SNMP and map its states to channels instead of the GPIO inputs.</p>";
+        upsSection += "<label for=\"upsIP\">UPS IP address:</label>";
+        upsSection += "<input type=\"text\" id=\"upsIP\" placeholder=\"192.168.1.20\" value=\"" + ups.ip + "\"><br><br>";
+        upsSection += "<label for=\"upsCommunity\">SNMP community:</label>";
+        upsSection += "<input type=\"text\" id=\"upsCommunity\" value=\"" + ups.community + "\"><br><br>";
+        upsSection += "<label for=\"upsPort\">SNMP port:</label>";
+        upsSection += "<input type=\"number\" id=\"upsPort\" value=\"" + String(ups.port) + "\"><br><br>";
+        upsSection += "<label for=\"upsInterval\">Poll interval (seconds):</label>";
+        upsSection += "<input type=\"number\" id=\"upsInterval\" min=\"1\" value=\"" + String(ups.pollIntervalSec) + "\"><br><br>";
+        upsSection += "<label for=\"upsSrc0\">Channel 1 source:</label>";
+        upsSection += "<select id=\"upsSrc0\">" + upsSourceOptions(ups.channelSource[0]) + "</select><br><br>";
+        upsSection += "<label for=\"upsSrc1\">Channel 2 source:</label>";
+        upsSection += "<select id=\"upsSrc1\">" + upsSourceOptions(ups.channelSource[1]) + "</select><br><br>";
+        upsSection += "<button type=\"button\" class=\"button\" onclick=\"saveUpsConfig()\">Save UPS Config</button>";
+        upsSection += "<p><strong>UPS status:</strong> <span id=\"ups-status\">" + status + "</span></p>";
+        upsSection += "</div>";
+    }
+
     String html = R"=====(
 <!DOCTYPE html>
 <html>
@@ -110,6 +146,7 @@ String WebServer::generateRootHTML() {
                     <button type="button" class="button" onclick="saveChannelNames()">Save Channel Names</button>
                 </form>
             </div>
+            )=====" + upsSection + R"=====(
             <br>
             <div class="pairing-controls">
                 <h3>Pairing Management</h3>
@@ -138,6 +175,12 @@ String WebServer::generateRootHTML() {
                     document.getElementById('paired-ip').textContent = data.paired_device_ip || 'None';
                     document.getElementById('peer-status').textContent = data.has_peer ? (data.peer_online ? 'Online' : 'Offline') : 'N/A';
                     document.getElementById('discovery-btn').textContent = data.discovery_enabled ? 'Disable Discovery' : 'Enable Discovery';
+                    var ue = document.getElementById('ups-status');
+                    if (ue && data.ups) {
+                        if (!data.ups.ip) { ue.textContent = 'Not configured'; }
+                        else if (!data.ups.reachable) { ue.textContent = 'Unreachable'; }
+                        else { ue.textContent = 'Reachable' + (data.ups.on_battery ? ', ON BATTERY' : '') + (data.ups.battery_low ? ', BATTERY LOW' : ''); }
+                    }
                 })
                 .catch(error => console.log('Error:', error));
         }, 2000);
@@ -194,7 +237,28 @@ String WebServer::generateRootHTML() {
             })
             .catch(error => console.log('Error:', error));
         }
-        
+
+        function saveUpsConfig() {
+            const payload = {
+                ip: document.getElementById('upsIP').value.trim(),
+                community: document.getElementById('upsCommunity').value.trim(),
+                port: parseInt(document.getElementById('upsPort').value) || 161,
+                poll_interval: parseInt(document.getElementById('upsInterval').value) || 10,
+                channel_source: [
+                    parseInt(document.getElementById('upsSrc0').value),
+                    parseInt(document.getElementById('upsSrc1').value)
+                ]
+            };
+            fetch('/ups_config', {
+                method: 'POST',
+                headers: {'Content-Type': 'application/json'},
+                body: JSON.stringify(payload)
+            })
+            .then(response => response.json())
+            .then(data => alert(data.message || 'UPS configuration saved'))
+            .catch(error => alert('Error: ' + error.message));
+        }
+
         function unpairDevice() {
             if (confirm('Are you sure you want to unpair this device?')) {
                 fetch('/api', {
@@ -344,6 +408,20 @@ void WebServer::handleAPI() {
                    (currentMode == MODE_DRY_CONTACT_SENDER && receiverIP.length() > 0);
     doc["has_peer"] = hasPeer;
     doc["peer_online"] = peerOnline;
+
+    // UPS (SNMP) configuration + status (sender mode)
+    JsonObject upsObj = doc["ups"].to<JsonObject>();
+    upsObj["ip"] = ups.ip;
+    upsObj["community"] = ups.community;
+    upsObj["port"] = ups.port;
+    upsObj["poll_interval"] = ups.pollIntervalSec;
+    upsObj["enabled"] = ups.usesUps() && ups.ip.length() > 0;
+    upsObj["reachable"] = ups.reachable;
+    upsObj["on_battery"] = ups.onBattery;
+    upsObj["battery_low"] = ups.batteryLow;
+    JsonArray srcArr = upsObj["channel_source"].to<JsonArray>();
+    srcArr.add(ups.channelSource[0]);
+    srcArr.add(ups.channelSource[1]);
     
     // Add channel names
     doc["channel_names"] = JsonArray();
@@ -694,6 +772,79 @@ void WebServer::handleChannelNames() {
         doc["channel1_name"] = channel1Name;
         doc["channel2_name"] = channel2Name;
         doc["max_length"] = MAX_CHANNEL_NAME_LENGTH;
+        String response;
+        serializeJson(doc, response);
+        server.send(200, "application/json", response);
+    }
+}
+
+String WebServer::upsSourceOptions(int selected) {
+    struct { int value; const char* label; } opts[] = {
+        {SRC_GPIO,            "GPIO input"},
+        {SRC_UPS_ON_BATTERY,  "UPS: On battery"},
+        {SRC_UPS_BATTERY_LOW, "UPS: Battery low"},
+        {SRC_DISABLED,        "Disabled"},
+    };
+    String out;
+    for (auto& o : opts) {
+        out += "<option value=\"" + String(o.value) + "\"" +
+               (o.value == selected ? " selected" : "") + ">" + o.label + "</option>";
+    }
+    return out;
+}
+
+void WebServer::handleUpsConfig() {
+    if (server.method() == HTTP_POST) {
+        String body = server.arg("plain");
+        JsonDocument req;
+        if (deserializeJson(req, body)) {
+            server.send(400, "text/plain", "Invalid JSON");
+            return;
+        }
+
+        ups.ip = (const char*)(req["ip"] | "");
+        ups.ip.trim();
+        ups.community = (const char*)(req["community"] | "public");
+        ups.community.trim();
+        if (ups.community.length() == 0) ups.community = "public";
+
+        int port = req["port"] | (int)SNMP_DEFAULT_PORT;
+        ups.port = (port > 0 && port <= 65535) ? (uint16_t)port : SNMP_DEFAULT_PORT;
+
+        int interval = req["poll_interval"] | (int)UPS_DEFAULT_POLL_INTERVAL_S;
+        if (interval < 1) interval = 1;
+        if (interval > 3600) interval = 3600;
+        ups.pollIntervalSec = (uint16_t)interval;
+
+        for (int i = 0; i < 2; i++) {
+            int s = req["channel_source"][i] | (int)SRC_GPIO;
+            if (s < SRC_GPIO || s > SRC_DISABLED) s = SRC_GPIO;
+            ups.channelSource[i] = s;
+        }
+
+        if (saveUpsConfigCallback) {
+            saveUpsConfigCallback();
+        }
+
+        JsonDocument response;
+        response["status"] = "success";
+        response["message"] = "UPS configuration saved";
+        String resp;
+        serializeJson(response, resp);
+        server.send(200, "application/json", resp);
+    } else {
+        // GET - return current UPS config + status
+        JsonDocument doc;
+        doc["ip"] = ups.ip;
+        doc["community"] = ups.community;
+        doc["port"] = ups.port;
+        doc["poll_interval"] = ups.pollIntervalSec;
+        doc["reachable"] = ups.reachable;
+        doc["on_battery"] = ups.onBattery;
+        doc["battery_low"] = ups.batteryLow;
+        JsonArray srcArr = doc["channel_source"].to<JsonArray>();
+        srcArr.add(ups.channelSource[0]);
+        srcArr.add(ups.channelSource[1]);
         String response;
         serializeJson(doc, response);
         server.send(200, "application/json", response);
