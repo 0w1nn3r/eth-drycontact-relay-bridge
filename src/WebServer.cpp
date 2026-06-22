@@ -3,7 +3,7 @@
 WebServer::WebServer(String& deviceID, OperationMode& currentMode, bool& ethernetConnected,
                      bool& jumperModeDetected, bool& isPaired, String& pairedDeviceID,
                      String& pairedDeviceIP, String& receiverIP,
-                     bool& discoveryEnabled, bool& peerOnline, UpsState& ups,
+                     bool& discoveryEnabled, bool& peerOnline, UpsState& ups, UnifiState& unifi,
                      bool* dryContactState, bool* relayState,
                      String& channel1Name, String& channel2Name)
     : server(WEB_PORT),
@@ -20,6 +20,7 @@ WebServer::WebServer(String& deviceID, OperationMode& currentMode, bool& etherne
       discoveryEnabled(discoveryEnabled),
       peerOnline(peerOnline),
       ups(ups),
+      unifi(unifi),
       dryContactState(dryContactState),
       relayState(relayState),
       channel1Name(channel1Name),
@@ -38,6 +39,8 @@ void WebServer::begin() {
     server.on("/command", HTTP_POST, std::bind(&WebServer::handleCommand, this));
     server.on("/channel_names", HTTP_ANY, std::bind(&WebServer::handleChannelNames, this));
     server.on("/ups_config", HTTP_ANY, std::bind(&WebServer::handleUpsConfig, this));
+    server.on("/unifi", HTTP_ANY, std::bind(&WebServer::handleUnifi, this));
+    server.on("/unifi_config", HTTP_ANY, std::bind(&WebServer::handleUnifiConfig, this));
     
     server.begin();
     Serial.println("HTTP server started");
@@ -84,6 +87,9 @@ String WebServer::generateRootHTML() {
         upsSection += "<button type=\"button\" class=\"button\" onclick=\"saveUpsConfig()\">Save UPS Config</button>";
         upsSection += "<p><strong>UPS status:</strong> <span id=\"ups-status\">" + status + "</span></p>";
         upsSection += "</div>";
+        upsSection += "<br><div class=\"unifi-link\"><h3>UniFi WAN Input</h3>";
+        upsSection += "<p>Map UniFi gateway WAN states (primary/secondary down, failover) to channels.</p>";
+        upsSection += "<a href=\"/unifi\" class=\"button\">UniFi WAN Config</a></div>";
     }
 
     String html = R"=====(
@@ -422,6 +428,26 @@ void WebServer::handleAPI() {
     JsonArray srcArr = upsObj["channel_source"].to<JsonArray>();
     srcArr.add(ups.channelSource[0]);
     srcArr.add(ups.channelSource[1]);
+
+    // UniFi (UniFi Network API) configuration + WAN status (sender mode)
+    bool unifiUsed = false;
+    for (int i = 0; i < 2; i++) {
+        if (ups.channelSource[i] == SRC_UNIFI_PRIMARY_DOWN ||
+            ups.channelSource[i] == SRC_UNIFI_SECONDARY_DOWN ||
+            ups.channelSource[i] == SRC_UNIFI_FAILOVER) {
+            unifiUsed = true;
+        }
+    }
+    JsonObject unifiObj = doc["unifi"].to<JsonObject>();
+    unifiObj["host"] = unifi.host;
+    unifiObj["site"] = unifi.site;
+    unifiObj["poll_interval"] = unifi.pollIntervalSec;
+    unifiObj["enabled"] = unifiUsed && unifi.host.length() > 0;
+    unifiObj["reachable"] = unifi.reachable;
+    unifiObj["wan_status"] = unifi.wanStatus;
+    unifiObj["primary_down"] = unifi.primaryDown;
+    unifiObj["secondary_down"] = unifi.secondaryDown;
+    unifiObj["failover"] = unifi.failover;
     
     // Add channel names
     doc["channel_names"] = JsonArray();
@@ -780,10 +806,13 @@ void WebServer::handleChannelNames() {
 
 String WebServer::upsSourceOptions(int selected) {
     struct { int value; const char* label; } opts[] = {
-        {SRC_GPIO,            "GPIO input"},
-        {SRC_UPS_ON_BATTERY,  "UPS: On battery"},
-        {SRC_UPS_BATTERY_LOW, "UPS: Battery low"},
-        {SRC_DISABLED,        "Disabled"},
+        {SRC_GPIO,                 "GPIO input"},
+        {SRC_UPS_ON_BATTERY,       "UPS: On battery"},
+        {SRC_UPS_BATTERY_LOW,      "UPS: Battery low"},
+        {SRC_UNIFI_PRIMARY_DOWN,   "UniFi: Primary WAN down"},
+        {SRC_UNIFI_SECONDARY_DOWN, "UniFi: Secondary WAN down"},
+        {SRC_UNIFI_FAILOVER,       "UniFi: Failover active"},
+        {SRC_DISABLED,             "Disabled"},
     };
     String out;
     for (auto& o : opts) {
@@ -849,6 +878,177 @@ void WebServer::handleUpsConfig() {
         serializeJson(doc, response);
         server.send(200, "application/json", response);
     }
+}
+
+void WebServer::handleUnifiConfig() {
+    if (server.method() == HTTP_POST) {
+        String body = server.arg("plain");
+        JsonDocument req;
+        if (deserializeJson(req, body)) {
+            server.send(400, "text/plain", "Invalid JSON");
+            return;
+        }
+
+        unifi.host = (const char*)(req["host"] | "");
+        unifi.host.trim();
+        unifi.site = (const char*)(req["site"] | "default");
+        unifi.site.trim();
+        if (unifi.site.length() == 0) unifi.site = "default";
+
+        // Only overwrite the API key when a new one is supplied (the form does
+        // not echo the stored key back).
+        String newKey = (const char*)(req["api_key"] | "");
+        newKey.trim();
+        if (newKey.length() > 0) {
+            unifi.apiKey = newKey;
+        }
+
+        int interval = req["poll_interval"] | (int)UNIFI_DEFAULT_POLL_INTERVAL_S;
+        if (interval < 1) interval = 1;
+        if (interval > 3600) interval = 3600;
+        unifi.pollIntervalSec = (uint16_t)interval;
+
+        for (int i = 0; i < 2; i++) {
+            int s = req["channel_source"][i] | ups.channelSource[i];
+            if (s < SRC_GPIO || s > SRC_UNIFI_FAILOVER) s = SRC_GPIO;
+            ups.channelSource[i] = s;
+        }
+
+        if (saveUnifiConfigCallback) saveUnifiConfigCallback();
+        if (saveUpsConfigCallback) saveUpsConfigCallback();  // persists channel_source
+
+        JsonDocument response;
+        response["status"] = "success";
+        response["message"] = "UniFi configuration saved";
+        String resp;
+        serializeJson(response, resp);
+        server.send(200, "application/json", resp);
+    } else {
+        // GET - current config + status (API key is never returned)
+        JsonDocument doc;
+        doc["host"] = unifi.host;
+        doc["site"] = unifi.site;
+        doc["poll_interval"] = unifi.pollIntervalSec;
+        doc["has_key"] = unifi.apiKey.length() > 0;
+        doc["reachable"] = unifi.reachable;
+        doc["wan_status"] = unifi.wanStatus;
+        doc["primary_down"] = unifi.primaryDown;
+        doc["secondary_down"] = unifi.secondaryDown;
+        doc["failover"] = unifi.failover;
+        JsonArray srcArr = doc["channel_source"].to<JsonArray>();
+        srcArr.add(ups.channelSource[0]);
+        srcArr.add(ups.channelSource[1]);
+        String response;
+        serializeJson(doc, response);
+        server.send(200, "application/json", response);
+    }
+}
+
+void WebServer::handleUnifi() {
+    String keyPlaceholder = unifi.apiKey.length() > 0 ? "(unchanged - leave blank to keep)" : "X-API-KEY";
+    String html = R"=====(
+<!DOCTYPE html>
+<html>
+<head>
+    <title>UniFi WAN Monitoring - )=====" + String(BOARD_NAME) + R"=====(</title>
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <style>
+        body { font-family: Arial, sans-serif; margin: 20px; background: #f5f5f5; }
+        .container { max-width: 700px; margin: 0 auto; background: white; padding: 20px; border-radius: 8px; }
+        h1 { color: #333; }
+        label { display: block; margin: 10px 0 4px; font-weight: bold; }
+        input, select { width: 100%; padding: 8px; border: 1px solid #ddd; border-radius: 4px; box-sizing: border-box; }
+        .btn { background: #007bff; color: white; padding: 10px 18px; border: none; border-radius: 4px; cursor: pointer; margin-top: 14px; }
+        .btn:hover { background: #0056b3; }
+        .status { padding: 10px; margin: 12px 0; border-radius: 4px; background: #f0f0f0; }
+        .muted { color: #666; font-size: 0.9em; }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <h1>UniFi WAN Monitoring</h1>
+        <a href="/" class="btn">Back to Main</a>
+        <p class="muted">Poll a UniFi gateway over HTTPS and map WAN states to channels. Generate an API key in the Network app under Settings &rarr; Control Plane / Integrations.</p>
+
+        <label for="unifiHost">Gateway IP / host:</label>
+        <input type="text" id="unifiHost" placeholder="192.168.1.1" value=")=====" + unifi.host + R"=====(">
+
+        <label for="unifiKey">API key:</label>
+        <input type="password" id="unifiKey" placeholder=")=====" + keyPlaceholder + R"=====(">
+
+        <label for="unifiSite">Site:</label>
+        <input type="text" id="unifiSite" value=")=====" + unifi.site + R"=====(">
+
+        <label for="unifiInterval">Poll interval (seconds):</label>
+        <input type="number" id="unifiInterval" min="1" value=")=====" + String(unifi.pollIntervalSec) + R"=====(">
+
+        <label for="unifiSrc0">Channel 1 source:</label>
+        <select id="unifiSrc0">)=====" + upsSourceOptions(ups.channelSource[0]) + R"=====(</select>
+
+        <label for="unifiSrc1">Channel 2 source:</label>
+        <select id="unifiSrc1">)=====" + upsSourceOptions(ups.channelSource[1]) + R"=====(</select>
+
+        <button type="button" class="btn" onclick="saveUnifi()">Save UniFi Config</button>
+
+        <div class="status">
+            <strong>WAN status:</strong> <span id="unifi-status">checking...</span>
+        </div>
+        <div id="status-message"></div>
+    </div>
+
+    <script>
+        function refreshStatus() {
+            fetch('/api')
+                .then(r => r.json())
+                .then(d => {
+                    var el = document.getElementById('unifi-status');
+                    if (!d.unifi || !d.unifi.host) { el.textContent = 'Not configured'; return; }
+                    if (!d.unifi.reachable) { el.textContent = 'Console unreachable'; return; }
+                    var parts = ['wan=' + (d.unifi.wan_status || '?')];
+                    if (d.unifi.primary_down) parts.push('PRIMARY DOWN');
+                    if (d.unifi.secondary_down) parts.push('SECONDARY DOWN');
+                    if (d.unifi.failover) parts.push('FAILOVER');
+                    el.textContent = parts.join(', ');
+                })
+                .catch(e => {});
+        }
+
+        function saveUnifi() {
+            const key = document.getElementById('unifiKey').value;
+            const payload = {
+                host: document.getElementById('unifiHost').value.trim(),
+                site: document.getElementById('unifiSite').value.trim() || 'default',
+                poll_interval: parseInt(document.getElementById('unifiInterval').value) || 15,
+                channel_source: [
+                    parseInt(document.getElementById('unifiSrc0').value),
+                    parseInt(document.getElementById('unifiSrc1').value)
+                ]
+            };
+            if (key.length > 0) payload.api_key = key;
+            fetch('/unifi_config', {
+                method: 'POST',
+                headers: {'Content-Type': 'application/json'},
+                body: JSON.stringify(payload)
+            })
+            .then(r => r.json())
+            .then(d => {
+                document.getElementById('status-message').innerHTML =
+                    '<div class="status">' + (d.message || 'Saved') + '</div>';
+                document.getElementById('unifiKey').value = '';
+            })
+            .catch(e => {
+                document.getElementById('status-message').innerHTML =
+                    '<div class="status">Error: ' + e.message + '</div>';
+            });
+        }
+
+        refreshStatus();
+        setInterval(refreshStatus, 3000);
+    </script>
+</body>
+</html>
+)=====";
+    server.send(200, "text/html", html);
 }
 
 void WebServer::handleCommand() {
