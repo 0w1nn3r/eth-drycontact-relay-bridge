@@ -6,10 +6,13 @@
 // Per-channel input source for sender mode. A channel can be driven by its
 // physical dry-contact input (default) or by a state polled from a network UPS.
 enum ChannelSource {
-    SRC_GPIO = 0,             // Physical dry-contact GPIO input (default)
-    SRC_UPS_ON_BATTERY = 1,   // UPS upsOutputSource == battery(5)
-    SRC_UPS_BATTERY_LOW = 2,  // UPS upsBatteryStatus == batteryLow(3)/depleted(4)
-    SRC_DISABLED = 3          // Channel ignored, never sends commands
+    SRC_GPIO = 0,                  // Physical dry-contact GPIO input (default)
+    SRC_UPS_ON_BATTERY = 1,        // UPS upsOutputSource == battery(5)
+    SRC_UPS_BATTERY_LOW = 2,       // UPS upsBatteryStatus == batteryLow(3)/depleted(4)
+    SRC_DISABLED = 3,              // Channel ignored, never sends commands
+    SRC_UNIFI_PRIMARY_DOWN = 4,    // UniFi: primary WAN down
+    SRC_UNIFI_SECONDARY_DOWN = 5,  // UniFi: secondary WAN down
+    SRC_UNIFI_FAILOVER = 6         // UniFi: failover active (running on secondary)
 };
 
 // UPS polling configuration + most recent polled status (sender mode only).

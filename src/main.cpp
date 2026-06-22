@@ -15,6 +15,8 @@
 #include "TimeManager.h"
 #include "UpsState.h"
 #include "SnmpClient.h"
+#include "UnifiState.h"
+#include "UnifiClient.h"
 
 // Global variables
 OperationMode currentMode = MODE_UNDEFINED;
@@ -58,6 +60,11 @@ UpsState ups;
 unsigned long lastUpsPoll = 0;
 int upsFailCount = 0;
 
+// UniFi (UniFi Network API) WAN polling state for sender mode
+UnifiState unifi;
+unsigned long lastUnifiPoll = 0;
+int unifiFailCount = 0;
+
 // State logger
 StateLogger stateLogger;
 
@@ -74,7 +81,7 @@ bool factoryResetBootDetection = false;
 Display display;
 WebServer webServer(deviceID, currentMode, ethernetConnected, jumperModeDetected,
                    isPaired, pairedDeviceID, pairedDeviceIP, receiverIP,
-                   discoveryEnabled, peerOnline, ups, dryContactState, relayState,
+                   discoveryEnabled, peerOnline, ups, unifi, dryContactState, relayState,
                    channel1Name, channel2Name);
 
 // Function prototypes
@@ -105,6 +112,10 @@ void saveChannelNames();
 void loadUpsConfig();
 void saveUpsConfig();
 void pollUps();
+void loadUnifiConfig();
+void saveUnifiConfig();
+void pollUnifi();
+bool anyChannelUsesUnifi();
 bool channelInputActive(int channel);
 void checkFactoryReset();
 void performFactoryReset();
@@ -123,6 +134,7 @@ void setup() {
     loadPairingSettings();
     loadChannelNames();
     loadUpsConfig();
+    loadUnifiConfig();
 
     // Initialize state logger
     stateLogger.begin();
@@ -150,6 +162,7 @@ void setup() {
     stateLogger.setTimeManager(&timeManager);
     webServer.setChannelNameSaveCallback([]() { saveChannelNames(); });
     webServer.setUpsConfigSaveCallback([]() { saveUpsConfig(); });
+    webServer.setUnifiConfigSaveCallback([]() { saveUnifiConfig(); });
     webServer.begin();
     
     // Initialize mode-specific functionality
@@ -186,6 +199,14 @@ void loop() {
         millis() - lastUpsPoll > (unsigned long)ups.pollIntervalSec * 1000) {
         pollUps();
         lastUpsPoll = millis();
+    }
+
+    // Poll the UniFi gateway over HTTPS on its configured interval (sender mode)
+    if (currentMode == MODE_DRY_CONTACT_SENDER && ethernetConnected &&
+        unifi.host.length() > 0 && anyChannelUsesUnifi() &&
+        millis() - lastUnifiPoll > (unsigned long)unifi.pollIntervalSec * 1000) {
+        pollUnifi();
+        lastUnifiPoll = millis();
     }
 
     // Handle mode-specific operations
@@ -411,10 +432,13 @@ bool channelInputActive(int channel) {
             int pin = (channel == 0) ? DRY_CONTACT_PIN_1 : DRY_CONTACT_PIN_2;
             return digitalRead(pin) == LOW;
         }
-        case SRC_UPS_ON_BATTERY:  return ups.onBattery;
-        case SRC_UPS_BATTERY_LOW: return ups.batteryLow;
+        case SRC_UPS_ON_BATTERY:       return ups.onBattery;
+        case SRC_UPS_BATTERY_LOW:      return ups.batteryLow;
+        case SRC_UNIFI_PRIMARY_DOWN:   return unifi.primaryDown;
+        case SRC_UNIFI_SECONDARY_DOWN: return unifi.secondaryDown;
+        case SRC_UNIFI_FAILOVER:       return unifi.failover;
         case SRC_DISABLED:
-        default:                  return false;
+        default:                       return false;
     }
 }
 
@@ -443,6 +467,51 @@ void pollUps() {
             ups.reachable = false;
             ups.onBattery = true;   // fail to alarm
             ups.batteryLow = true;
+        }
+        // Below the threshold: hold the last known states to ride out blips.
+    }
+}
+
+// True if either channel is mapped to a UniFi WAN state.
+bool anyChannelUsesUnifi() {
+    for (int i = 0; i < 2; i++) {
+        int s = ups.channelSource[i];
+        if (s == SRC_UNIFI_PRIMARY_DOWN || s == SRC_UNIFI_SECONDARY_DOWN ||
+            s == SRC_UNIFI_FAILOVER) {
+            return true;
+        }
+    }
+    return false;
+}
+
+// Poll the UniFi gateway over HTTPS and update the WAN state. Like the UPS
+// poller, after repeated failures the device fails to alarm: it asserts all
+// WAN-down states so any UniFi-mapped channel trips rather than masking a fault.
+void pollUnifi() {
+    UnifiHealth health;
+    if (unifiFetchHealth(unifi.host, unifi.apiKey, unifi.site, health, UNIFI_TIMEOUT_MS)) {
+        unifi.primaryDown = health.primaryDown;
+        unifi.secondaryDown = health.secondaryDown;
+        unifi.failover = health.failover;
+        unifi.wanStatus = health.wanStatus;
+        unifi.reachable = true;
+        unifiFailCount = 0;
+        Serial.println("UniFi poll OK: wanStatus=" + unifi.wanStatus +
+                       " (primaryDown=" + String(unifi.primaryDown) +
+                       ", secondaryDown=" + String(unifi.secondaryDown) +
+                       ", failover=" + String(unifi.failover) + ")");
+    } else {
+        unifiFailCount++;
+        Serial.println("UniFi poll FAILED (" + String(unifiFailCount) + " consecutive)");
+        if (unifiFailCount >= UNIFI_FAIL_ALARM_COUNT) {
+            if (unifi.reachable) {
+                stateLogger.logSystemEvent("UniFi console unreachable - failing to alarm");
+            }
+            unifi.reachable = false;
+            unifi.wanStatus = "unreachable";
+            unifi.primaryDown = true;   // fail to alarm
+            unifi.secondaryDown = true;
+            unifi.failover = true;
         }
         // Below the threshold: hold the last known states to ride out blips.
     }
@@ -1019,6 +1088,42 @@ void saveUpsConfig() {
     Serial.println("UPS config saved: ip='" + ups.ip + "'");
 }
 
+void loadUnifiConfig() {
+    Preferences preferences;
+    preferences.begin("unifi", false);
+
+    unifi.host = preferences.getString("host", "");
+    unifi.apiKey = preferences.getString("apikey", "");
+    unifi.site = preferences.getString("site", "default");
+    unifi.pollIntervalSec = preferences.getUShort("interval", UNIFI_DEFAULT_POLL_INTERVAL_S);
+
+    if (unifi.pollIntervalSec < 1) unifi.pollIntervalSec = 1;
+    if (unifi.site.length() == 0) unifi.site = "default";
+
+    preferences.end();
+    Serial.println("UniFi config loaded: host='" + unifi.host + "' site='" +
+                   unifi.site + "' interval=" + String(unifi.pollIntervalSec) + "s");
+}
+
+void saveUnifiConfig() {
+    Preferences preferences;
+    preferences.begin("unifi", false);
+
+    preferences.putString("host", unifi.host);
+    preferences.putString("apikey", unifi.apiKey);
+    preferences.putString("site", unifi.site);
+    preferences.putUShort("interval", unifi.pollIntervalSec);
+
+    preferences.end();
+
+    // Re-seed change detection and force a prompt fresh poll.
+    dryContactState[0] = channelInputActive(0);
+    dryContactState[1] = channelInputActive(1);
+    unifiFailCount = 0;
+    lastUnifiPoll = 0;
+    Serial.println("UniFi config saved: host='" + unifi.host + "'");
+}
+
 void checkFactoryReset() {
     Serial.println("Checking for factory reset button during boot...");
     
@@ -1103,6 +1208,11 @@ void performFactoryReset() {
 
     // Clear UPS config
     preferences.begin("ups", false);
+    preferences.clear();
+    preferences.end();
+
+    // Clear UniFi config
+    preferences.begin("unifi", false);
     preferences.clear();
     preferences.end();
 

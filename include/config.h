@@ -79,6 +79,11 @@ enum OperationMode {
 #define UPS_DEFAULT_POLL_INTERVAL_S 10
 #define UPS_FAIL_ALARM_COUNT 3           // consecutive poll failures -> fail to alarm
 
+// UniFi (UniFi Network API) WAN polling for sender mode
+#define UNIFI_DEFAULT_POLL_INTERVAL_S 15
+#define UNIFI_TIMEOUT_MS 4000            // per-poll HTTPS timeout
+#define UNIFI_FAIL_ALARM_COUNT 3         // consecutive poll failures -> fail to alarm
+
 // Web interface
 #define WEB_UPDATE_INTERVAL_MS 2000
 #define MAX_CLIENTS 4

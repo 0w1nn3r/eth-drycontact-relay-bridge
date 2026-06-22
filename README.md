@@ -9,6 +9,7 @@ A versatile Ethernet-based relay bridge using the Waveshare ESP32-P4-ETH board t
   - **Relay Receiver**: Receives commands over Ethernet and controls relay outputs
 
 - **UPS (SNMP) Input**: The sender can poll a network UPS over SNMP and map its "on battery" / "battery low" states to channels instead of the GPIO inputs
+- **UniFi WAN Input**: The sender can poll a UniFi gateway over the local Network API (HTTPS) and map WAN primary-down / secondary-down / failover states to channels
 
 - **Hardware Interface**:
   - **OLED Display**: 128x64 SSD1306 display showing device status, IP addresses, and I/O states
@@ -106,6 +107,22 @@ State mapping uses the standard RFC 1628 UPS-MIB:
 When a mapped state becomes active the channel is sent to the receiver exactly like a closing contact. **Fail-safe:** after 3 consecutive failed polls the UPS is treated as on-battery (and battery-low), so UPS-mapped channels alarm rather than masking a real outage; transient blips below that threshold hold the last known state. UPS reachability and state are shown on the web UI.
 
 > Note: the UPS card must have SNMP v1/v2c read enabled and support the standard UPS-MIB. Some vendors expose these values only under proprietary MIBs/OIDs.
+
+#### UniFi WAN Input
+The sender can also poll a UniFi gateway (UDM/UXG) over the local UniFi Network API and map WAN failover states to channels. Configured on a dedicated web page (**UniFi WAN Config**, linked from the main page in sender mode):
+
+- **Gateway IP / API key / site**: HTTPS connection to the console. Generate the key in the Network app under Settings → Control Plane / Integrations; the site is usually `default`.
+- **Poll interval**: how often to query the console (seconds).
+- **Per-channel source**: each channel can be set to `UniFi: Primary WAN down`, `UniFi: Secondary WAN down`, or `UniFi: Failover active` (alongside the GPIO/UPS options).
+
+The firmware does an HTTPS `GET /proxy/network/api/s/{site}/stat/health` with `X-API-KEY` auth (self-signed cert accepted) and derives WAN state from the `wan` subsystem:
+- **Primary WAN down** ← `wan.status == "error"` (or primary `uptime_stats.WAN.availability` at 0)
+- **Secondary WAN down** ← `uptime_stats.WAN2.availability` at 0 (dual-WAN only)
+- **Failover active** ← primary down while a healthy secondary (`WAN2`) is present
+
+When a mapped state becomes active the channel is sent to the receiver exactly like a closing contact. **Fail-safe:** after 3 consecutive failed polls all WAN-down states are asserted (fail to alarm); shorter blips hold the last known state.
+
+> Note: WAN state is derived from `stat/health`. Single-WAN primary-down detection is reliable; **secondary-down and failover detection are inferred from `uptime_stats.WAN2` and should be verified against a real dual-WAN failover** (the raw response is logged to serial to aid this).
 
 #### Relay Receiver Mode
 - Listens for commands over UDP/TCP
@@ -273,6 +290,8 @@ The device features a comprehensive web interface with advanced capabilities:
 - `GET /status` - Basic device status
 - `GET /discovery` - Device discovery information
 - `GET/POST /ups_config` - UPS (SNMP) polling configuration and status (sender mode)
+- `GET /unifi` - UniFi WAN monitoring configuration page (sender mode)
+- `GET/POST /unifi_config` - UniFi polling configuration and WAN status (sender mode)
 
 ### Communication Protocol
 

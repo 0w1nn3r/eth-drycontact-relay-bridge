@@ -11,6 +11,7 @@
 #include "Display.h"
 #include "StateLogger.h"
 #include "UpsState.h"
+#include "UnifiState.h"
 
 // Forward declarations
 class Display;
@@ -34,13 +35,15 @@ private:
     bool& discoveryEnabled;
     bool& peerOnline;
     UpsState& ups;
+    UnifiState& unifi;
     bool* dryContactState;
     bool* relayState;
     String& channel1Name;
     String& channel2Name;
     std::function<void()> saveChannelNamesCallback;
     std::function<void()> saveUpsConfigCallback;
-    
+    std::function<void()> saveUnifiConfigCallback;
+
     // Web server handlers
     void handleRoot();
     void handleAPI();
@@ -54,6 +57,8 @@ private:
     // Enhanced handler methods
     void handleChannelNames();
     void handleUpsConfig();
+    void handleUnifi();
+    void handleUnifiConfig();
 
     // Helper methods
     String generateRootHTML();
@@ -65,7 +70,7 @@ public:
     WebServer(String& deviceID, OperationMode& currentMode, bool& ethernetConnected,
               bool& jumperModeDetected, bool& isPaired, String& pairedDeviceID,
               String& pairedDeviceIP, String& receiverIP,
-              bool& discoveryEnabled, bool& peerOnline, UpsState& ups,
+              bool& discoveryEnabled, bool& peerOnline, UpsState& ups, UnifiState& unifi,
               bool* dryContactState, bool* relayState,
               String& channel1Name, String& channel2Name);
 
@@ -73,6 +78,7 @@ public:
     void setStateLogger(StateLogger* loggerPtr) { stateLogger = loggerPtr; }
     void setChannelNameSaveCallback(std::function<void()> callback) { saveChannelNamesCallback = callback; }
     void setUpsConfigSaveCallback(std::function<void()> callback) { saveUpsConfigCallback = callback; }
+    void setUnifiConfigSaveCallback(std::function<void()> callback) { saveUnifiConfigCallback = callback; }
     void begin();
     void handleClient();
     
